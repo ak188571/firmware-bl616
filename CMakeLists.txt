@@ -4,6 +4,12 @@ cmake_minimum_required(VERSION 3.15)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# UI16 fixed-frame test option
+option(UI16_UART_SELFTEST "Send fixed UI16 frame after monitor loads" OFF)
+if(UI16_UART_SELFTEST)
+    add_definitions(-DUI16_UART_SELFTEST)
+endif()
+
 set(CONFIG_FREERTOS 1)
 set(CONFIG_CHERRYUSB 1)
 set(CONFIG_CHERRYUSB_HOST 1)

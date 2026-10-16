@@ -9,6 +9,8 @@ BOARD ?= bl616dk
 CROSS_COMPILE ?= riscv64-unknown-elf-
 
 cmake_definition+=-DTANG_BOARD=$(TANG_BOARD)
+UI16_UART_SELFTEST ?= OFF
+cmake_definition+=-DUI16_UART_SELFTEST=$(UI16_UART_SELFTEST)
 
 include $(BL_SDK_BASE)/project.build
 

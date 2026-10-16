@@ -1,0 +1,29 @@
+file(REMOVE_RECURSE
+  "../../../lib/libcherryusb.a"
+  "../../../lib/libcherryusb.pdb"
+  "CMakeFiles/cherryusb.dir/class/audio/usbh_audio.c.obj"
+  "CMakeFiles/cherryusb.dir/class/audio/usbh_audio.c.obj.d"
+  "CMakeFiles/cherryusb.dir/class/cdc/usbh_cdc_acm.c.obj"
+  "CMakeFiles/cherryusb.dir/class/cdc/usbh_cdc_acm.c.obj.d"
+  "CMakeFiles/cherryusb.dir/class/hid/usbh_hid.c.obj"
+  "CMakeFiles/cherryusb.dir/class/hid/usbh_hid.c.obj.d"
+  "CMakeFiles/cherryusb.dir/class/hub/usbh_hub.c.obj"
+  "CMakeFiles/cherryusb.dir/class/hub/usbh_hub.c.obj.d"
+  "CMakeFiles/cherryusb.dir/class/msc/usbh_msc.c.obj"
+  "CMakeFiles/cherryusb.dir/class/msc/usbh_msc.c.obj.d"
+  "CMakeFiles/cherryusb.dir/class/vendor/xbox/usbh_xbox.c.obj"
+  "CMakeFiles/cherryusb.dir/class/vendor/xbox/usbh_xbox.c.obj.d"
+  "CMakeFiles/cherryusb.dir/class/video/usbh_video.c.obj"
+  "CMakeFiles/cherryusb.dir/class/video/usbh_video.c.obj.d"
+  "CMakeFiles/cherryusb.dir/core/usbh_core.c.obj"
+  "CMakeFiles/cherryusb.dir/core/usbh_core.c.obj.d"
+  "CMakeFiles/cherryusb.dir/osal/usb_osal_freertos.c.obj"
+  "CMakeFiles/cherryusb.dir/osal/usb_osal_freertos.c.obj.d"
+  "CMakeFiles/cherryusb.dir/port/ehci/usb_hc_ehci.c.obj"
+  "CMakeFiles/cherryusb.dir/port/ehci/usb_hc_ehci.c.obj.d"
+)
+
+# Per-language clean rules from dependency scanning.
+foreach(lang C)
+  include(CMakeFiles/cherryusb.dir/cmake_clean_${lang}.cmake OPTIONAL)
+endforeach()

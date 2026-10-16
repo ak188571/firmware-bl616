@@ -412,6 +412,16 @@ static void main_task(void *pvParameters)
     string fname;
     if (find_core_for_board(fname, "monitor.bin")) {
         fpga_program(fname.c_str());
+        // UI16 fixed-frame test BEGIN
+        #ifdef UI16_UART_SELFTEST
+            extern void ui16_send_selftest();
+            delay(1000);
+            for (;;) {
+                ui16_send_selftest();
+                delay(1000);
+            }
+        #endif
+        // UI16 fixed-frame test END
     } else {
         overlay_status("No monitor.bin found for board.");
     }

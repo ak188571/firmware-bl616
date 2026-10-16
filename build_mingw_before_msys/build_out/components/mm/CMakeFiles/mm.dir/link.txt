@@ -1,0 +1,1 @@
+riscv64-unknown-elf-ar.exe crD ..\..\lib\libmm.a CMakeFiles/mm.dir/mem.c.obj CMakeFiles/mm.dir/tlsf/tlsf.c.obj CMakeFiles/mm.dir/tlsf/bflb_tlsf.c.obj
