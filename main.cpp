@@ -34,6 +34,10 @@ extern "C" {
 #include "init.h"
 #include "menu_manager.h"
 
+#ifdef UI16_SYSTEM_MENU
+#include "ui16_system_menu.h"
+#endif
+
 // Uncomment this to enable UART console (use with caution. it may interfere with MCU-FPGA communication)
 #define UART_CONSOLE
 
@@ -411,7 +415,36 @@ static void main_task(void *pvParameters)
     // load monitor core at startup
     string fname;
     if (find_core_for_board(fname, "monitor.bin")) {
-        fpga_program(fname.c_str());
+        const bool monitor_loaded = fpga_program(fname.c_str());
+#ifdef UI16_SYSTEM_MENU
+        if (!monitor_loaded) {
+            overlay_status("UI16: monitor load failed");
+            for (;;) delay(1000);
+        }
+        // Keep the configured order; include existing Cores/Options entries.
+        Ui16MenuEntry entries[UI16_MENU_CAPACITY];
+        std::size_t count = 0;
+        for (const auto id : main_menu_config) {
+            if (id == 0 || count == UI16_MENU_CAPACITY) break;
+            if (id > 0) {
+                const auto *info = find_core_by_id(id);
+                if (info) entries[count++] = {id, info->display_name};
+            } else if (id == -1) {
+                entries[count++] = {id, "CORES"};
+            } else if (id == -2) {
+                entries[count++] = {id, "OPTIONS"};
+            }
+        }
+        delay(1000);
+        // Stage 1: refresh after late USB startup/status messages as in the self-test.
+        // Input/navigation is connected in stage 2.
+        for (;;) {
+            ui16_send_system_menu(entries, count);
+            delay(1000);
+        }
+#else
+        (void)monitor_loaded;
+#endif
         // UI16 fixed-frame test BEGIN
         #ifdef UI16_UART_SELFTEST
             extern void ui16_send_selftest();
