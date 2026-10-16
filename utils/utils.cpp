@@ -1,6 +1,20 @@
 #include "utils.h"
 
+#ifdef UI16_SYSTEM_MENU
+#include "ui16_display_mode.h"
+static bool ui16_display_active = false;
+
+void fpga_use_ui16_display(bool active) {
+    taskENTER_CRITICAL();
+    ui16_display_active = active;
+    taskEXIT_CRITICAL();
+}
+#endif
+
 void fpga_tx_header(int cmd, int len) {
+#ifdef UI16_SYSTEM_MENU
+    cmd = ui16_display_command(cmd, ui16_display_active);
+#endif
     bflb_uart_putchar(uart1_dev, 0xAA);
     bflb_uart_putchar(uart1_dev, len >> 8);
     bflb_uart_putchar(uart1_dev, len & 0xFF);

@@ -36,6 +36,7 @@ extern "C" {
 
 #ifdef UI16_SYSTEM_MENU
 #include "ui16_system_menu.h"
+#include "ui16_navigation.h"
 #endif
 
 // Uncomment this to enable UART console (use with caution. it may interfere with MCU-FPGA communication)
@@ -436,11 +437,23 @@ static void main_task(void *pvParameters)
             }
         }
         delay(1000);
-        // Stage 1: refresh after late USB startup/status messages as in the self-test.
-        // Input/navigation is connected in stage 2.
+        int initial = 0;
+        for (std::size_t i = 0; i < count; ++i) {
+            if (entries[i].id > 0) { initial = static_cast<int>(i); break; }
+        }
+        Ui16Navigation navigation(count, initial);
+        fpga_use_ui16_display(true);
+        ui16_send_system_menu(entries, count, navigation.selected());
+        // Stage 2: redraw only when Up/Down changes the selected item.
+        // Confirm/Back are connected to game lists in stage 3.
         for (;;) {
-            ui16_send_system_menu(entries, count);
-            delay(1000);
+            uint16_t joy1 = 0, joy2 = 0, hid1 = 0, hid2 = 0;
+            get_joypad_states(&joy1, &joy2, &hid1, &hid2);
+            const uint16_t buttons = joy1 | joy2 | hid1 | hid2;
+            if (navigation.update(buttons, static_cast<uint32_t>(bflb_mtimer_get_time_ms()))) {
+                ui16_send_system_menu(entries, count, navigation.selected());
+            }
+            delay(10);
         }
 #else
         (void)monitor_loaded;

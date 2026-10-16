@@ -16,6 +16,10 @@ extern "C" {
 }
 
 #define DEBUG(...) dprint(__VA_ARGS__)
+#ifdef UI16_SYSTEM_MENU
+// Switch display ownership after loading monitor; false restores legacy text output.
+void fpga_use_ui16_display(bool active);
+#endif
 // #define DEBUG(...) do {} while(0)
 
 extern struct bflb_device_s *gpio_dev;

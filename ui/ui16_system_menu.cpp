@@ -60,7 +60,7 @@ const char *label_for(const Ui16MenuEntry &entry)
 }
 
 void ui16_build_system_menu(const Ui16MenuEntry *entries, std::size_t count,
-                           std::uint16_t (&cells)[CELL_COUNT])
+                           std::uint16_t (&cells)[CELL_COUNT], int selected_index)
 {
     for (auto &cell : cells) cell = 0;
     text(cells + TEXT_UNITS_PER_ROW, "SYSTEMS", false);
@@ -68,16 +68,17 @@ void ui16_build_system_menu(const Ui16MenuEntry *entries, std::size_t count,
     int row = UI16_MENU_FIRST_ROW;
     for (std::size_t i = 0; entries && i < count && row < MENU_ROWS - 1; ++i) {
         if (entries[i].id == 0) break;
-        const bool select = entries[i].id > 0 && !selected;
+        const bool select = selected_index == -1 ? entries[i].id > 0 && !selected :
+                            selected_index >= 0 && i == static_cast<std::size_t>(selected_index);
         selected |= select;
         text(cells + row++ * TEXT_UNITS_PER_ROW, label_for(entries[i]), select);
     }
 }
 
-void ui16_send_system_menu(const Ui16MenuEntry *entries, std::size_t count)
+void ui16_send_system_menu(const Ui16MenuEntry *entries, std::size_t count, int selected_index)
 {
     std::uint16_t cells[CELL_COUNT];
-    ui16_build_system_menu(entries, count, cells);
+    ui16_build_system_menu(entries, count, cells, selected_index);
     for (int y = 0; y < MENU_ROWS; ++y) {
         taskENTER_CRITICAL();
         fpga_tx_header(ROW_COMMAND, 4 + 2 * TEXT_UNITS_PER_ROW);

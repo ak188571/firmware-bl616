@@ -10,7 +10,7 @@ if(UI16_UART_SELFTEST)
     add_definitions(-DUI16_UART_SELFTEST)
 endif()
 
-option(UI16_SYSTEM_MENU "Display static UI16 system menu (stage 1)" OFF)
+option(UI16_SYSTEM_MENU "Display UI16 system menu with Up/Down navigation" OFF)
 if(UI16_SYSTEM_MENU AND UI16_UART_SELFTEST)
     message(FATAL_ERROR "Enable only one of UI16_SYSTEM_MENU and UI16_UART_SELFTEST")
 endif()
