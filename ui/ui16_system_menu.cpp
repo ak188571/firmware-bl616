@@ -49,14 +49,15 @@ void text(std::uint16_t *row, const char *label, bool selected)
     }
 }
 
-const char *label_for(const Ui16MenuEntry &entry)
+}
+
+const char *ui16_system_label(const Ui16MenuEntry &entry)
 {
     switch (entry.id) {
     case 1: return u8"ファミリーコンピュータ";
     case 2: return u8"スーパーファミコン";
     default: return entry.name;
     }
-}
 }
 
 void ui16_build_system_menu(const Ui16MenuEntry *entries, std::size_t count,
@@ -71,14 +72,12 @@ void ui16_build_system_menu(const Ui16MenuEntry *entries, std::size_t count,
         const bool select = selected_index == -1 ? entries[i].id > 0 && !selected :
                             selected_index >= 0 && i == static_cast<std::size_t>(selected_index);
         selected |= select;
-        text(cells + row++ * TEXT_UNITS_PER_ROW, label_for(entries[i]), select);
+        text(cells + row++ * TEXT_UNITS_PER_ROW, ui16_system_label(entries[i]), select);
     }
 }
 
-void ui16_send_system_menu(const Ui16MenuEntry *entries, std::size_t count, int selected_index)
+static void send_cells(const std::uint16_t (&cells)[CELL_COUNT])
 {
-    std::uint16_t cells[CELL_COUNT];
-    ui16_build_system_menu(entries, count, cells, selected_index);
     for (int y = 0; y < MENU_ROWS; ++y) {
         taskENTER_CRITICAL();
         fpga_tx_header(ROW_COMMAND, 4 + 2 * TEXT_UNITS_PER_ROW);
@@ -92,5 +91,38 @@ void ui16_send_system_menu(const Ui16MenuEntry *entries, std::size_t count, int 
         }
         taskEXIT_CRITICAL();
     }
+}
+
+void ui16_send_system_menu(const Ui16MenuEntry *entries, std::size_t count, int selected_index)
+{
+    std::uint16_t cells[CELL_COUNT];
+    ui16_build_system_menu(entries, count, cells, selected_index);
+    send_cells(cells);
+}
+
+void ui16_build_game_menu(const char *heading, const Ui16GameList &games, int selected,
+                         std::uint16_t (&cells)[CELL_COUNT])
+{
+    for (auto &cell : cells) cell = 0;
+    text(cells + TEXT_UNITS_PER_ROW, heading, false);
+    if (games.status == Ui16ListStatus::Ready) {
+        for (std::size_t i = 0; i < games.names.size() && i < UI16_GAME_CAPACITY; ++i) {
+            text(cells + (UI16_MENU_FIRST_ROW + i) * TEXT_UNITS_PER_ROW,
+                 games.names[i].c_str(), selected >= 0 && i == static_cast<std::size_t>(selected));
+        }
+    } else {
+        const char *message = games.status == Ui16ListStatus::Empty ? "NO ROM FILES" :
+                              games.status == Ui16ListStatus::DirectoryError ? "DIRECTORY ERROR" : "READ ERROR";
+        text(cells + UI16_MENU_FIRST_ROW * TEXT_UNITS_PER_ROW, message, false);
+    }
+    text(cells + (MENU_ROWS - 1) * TEXT_UNITS_PER_ROW,
+         games.more ? "A BACK  MORE FILES" : "A BACK", false);
+}
+
+void ui16_send_game_menu(const char *heading, const Ui16GameList &games, int selected)
+{
+    std::uint16_t cells[CELL_COUNT];
+    ui16_build_game_menu(heading, games, selected, cells);
+    send_cells(cells);
 }
 #endif

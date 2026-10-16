@@ -1,0 +1,29 @@
+#pragma once
+#include "ui16_navigation.h"
+#include "ui16_game_list.h"
+
+inline constexpr std::uint16_t UI16_BUTTON_CONFIRM = 0x0001; // B
+inline constexpr std::uint16_t UI16_BUTTON_BACK = 0x0100;    // A
+using Ui16GameLoader = Ui16GameList (*)(int core_id, void *context);
+
+// Retains button edges across screen transitions; never starts a ROM.
+class Ui16Browser {
+public:
+    Ui16Browser(const Ui16MenuEntry *entries, std::size_t count, int initial = 0);
+    bool update(std::uint16_t buttons, std::uint32_t now_ms,
+                Ui16GameLoader loader, void *context = nullptr);
+    bool in_games() const { return in_games_; }
+    int selected_system() const { return systems_.selected(); }
+    int selected_file() const { return files_.selected(); }
+    const Ui16MenuEntry *active_system() const;
+    const Ui16GameList &game_list() const { return games_; }
+
+private:
+    const Ui16MenuEntry *entries_;
+    std::size_t count_;
+    Ui16Navigation systems_;
+    Ui16Navigation files_{0};
+    Ui16GameList games_;
+    std::uint16_t previous_buttons_ = 0;
+    bool in_games_ = false;
+};

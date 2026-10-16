@@ -37,6 +37,7 @@ extern "C" {
 #ifdef UI16_SYSTEM_MENU
 #include "ui16_system_menu.h"
 #include "ui16_navigation.h"
+#include "ui16_browser.h"
 #endif
 
 // Uncomment this to enable UART console (use with caution. it may interfere with MCU-FPGA communication)
@@ -382,6 +383,20 @@ static void uart1_rx_task(void *pvParameters)
     }
 }
 
+#ifdef UI16_SYSTEM_MENU
+static Ui16GameList ui16_load_for_core(int core_id, void *)
+{
+    const auto *info = find_core_by_id(core_id);
+    if (!info) {
+        Ui16GameList result;
+        result.status = Ui16ListStatus::DirectoryError;
+        return result;
+    }
+    const std::string path = std::string(drv) + info->rom_dir;
+    return ui16_read_game_list(path.c_str(), core_id);
+}
+#endif
+
 // Display main menu and call other menu functions
 static void main_task(void *pvParameters)
 {
@@ -441,17 +456,24 @@ static void main_task(void *pvParameters)
         for (std::size_t i = 0; i < count; ++i) {
             if (entries[i].id > 0) { initial = static_cast<int>(i); break; }
         }
-        Ui16Navigation navigation(count, initial);
+        Ui16Browser browser(entries, count, initial);
         fpga_use_ui16_display(true);
-        ui16_send_system_menu(entries, count, navigation.selected());
-        // Stage 2: redraw only when Up/Down changes the selected item.
-        // Confirm/Back are connected to game lists in stage 3.
+        const auto redraw = [&]() {
+            if (browser.in_games()) {
+                ui16_send_game_menu(ui16_system_label(*browser.active_system()),
+                                    browser.game_list(), browser.selected_file());
+            } else {
+                ui16_send_system_menu(entries, count, browser.selected_system());
+            }
+        };
+        redraw();
+        // Stage 3: B enters the game list, A returns; ROM loading is not connected.
         for (;;) {
             uint16_t joy1 = 0, joy2 = 0, hid1 = 0, hid2 = 0;
             get_joypad_states(&joy1, &joy2, &hid1, &hid2);
             const uint16_t buttons = joy1 | joy2 | hid1 | hid2;
-            if (navigation.update(buttons, static_cast<uint32_t>(bflb_mtimer_get_time_ms()))) {
-                ui16_send_system_menu(entries, count, navigation.selected());
+            if (browser.update(buttons, static_cast<uint32_t>(bflb_mtimer_get_time_ms()), ui16_load_for_core)) {
+                redraw();
             }
             delay(10);
         }
