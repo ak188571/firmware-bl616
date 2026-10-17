@@ -4,7 +4,7 @@
 Ui16Browser::Ui16Browser(const Ui16MenuEntry *entries, std::size_t count, int initial)
     : entries_(entries), count_(entries ? count : 0), systems_(count_, initial)
 {
-    system_top_=ui16_scroll_top(systems_.selected(),count_,0);
+    system_top_=ui16_system_scroll_top(entries_,count_,systems_.selected(),0);
 }
 
 const Ui16MenuEntry *Ui16Browser::active_system() const
@@ -26,7 +26,7 @@ void Ui16Browser::load(Ui16GameLoader loader, void *context, int selected)
     games_=loader && entry ? loader(entry->id,relative_path_.c_str(),context) : Ui16GameList{};
     if(!loader || !entry)games_.status=Ui16ListStatus::DirectoryError;
     files_=Ui16Navigation(games_.names.size(),selected);
-    file_top_=ui16_scroll_top(files_.selected(), games_.names.size(), file_top_);
+    file_top_=ui16_game_scroll_top(games_,files_.selected(), file_top_);
 }
 
 bool Ui16Browser::update(std::uint16_t buttons, std::uint32_t now_ms,
@@ -49,7 +49,7 @@ bool Ui16Browser::update(std::uint16_t buttons, std::uint32_t now_ms,
             for(std::size_t i=0;i<games_.names.size();++i)if(games_.names[i]==child) {
                 files_=Ui16Navigation(games_.names.size(),static_cast<int>(i));break;
             }
-            file_top_=ui16_scroll_top(files_.selected(),games_.names.size(),file_top_);
+            file_top_=ui16_game_scroll_top(games_,files_.selected(),file_top_);
         } else {
             in_games_ = false;
             levels_.clear();relative_path_.clear();
@@ -90,9 +90,9 @@ bool Ui16Browser::update(std::uint16_t buttons, std::uint32_t now_ms,
     const bool changed=in_games_ ? files_.update(buttons, now_ms) : systems_.update(buttons, now_ms);
     if(changed && in_games_) {
         games_.navigation_error=false;
-        file_top_=ui16_scroll_top(files_.selected(),games_.names.size(),file_top_);
+        file_top_=ui16_game_scroll_top(games_,files_.selected(),file_top_);
     } else if(changed) {
-        system_top_=ui16_scroll_top(systems_.selected(),count_,system_top_);
+        system_top_=ui16_system_scroll_top(entries_,count_,systems_.selected(),system_top_);
     }
     return changed;
 }

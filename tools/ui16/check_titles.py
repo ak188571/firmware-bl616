@@ -2,7 +2,7 @@
 """Recursively check tab-separated titles.csv, ROMs and folders against a font."""
 import argparse,json,unicodedata
 from pathlib import Path
-from titles_common import read_titles,EXTENSIONS,valid_filename,walk_directories,visible
+from titles_common import read_titles,EXTENSIONS,valid_filename,walk_directories,visible,decode_title,layout_text
 
 
 def main():
@@ -22,9 +22,13 @@ def main():
         if kind=='ERROR':errors+=1
         else:warnings+=1
         print(f'{kind}: {msg}')
-    def check(text,label,is_dir):
-        for cp in sorted(set(map(ord,text))-chars):report('ERROR',f'{label}: missing U+{cp:04X} {chr(cp)}')
-        if sum(1 if ord(c)<128 else 2 for c in text)+int(is_dir)>30:report('WARN',f'{label}: display clipped at 30 halfwidth units')
+    def check(text,label,is_dir,encoded=False):
+        text=decode_title(text) if encoded else text
+        try:
+            _,clipped=layout_text(text+('/' if is_dir else ''))
+        except ValueError as e:report('ERROR',f'{label}: {e}');clipped=False
+        for cp in sorted(set(map(ord,text.replace(chr(10),'')))-chars):report('ERROR',f'{label}: missing U+{cp:04X} {chr(cp)}')
+        if clipped:report('WARN',f'{label}: display clipped after two lines (30/29 halfwidth units)')
         if unicodedata.normalize('NFC',text)!=text:report('WARN',f'{label}: text is not NFC normalized')
     for directory in walk_directories(root):
         folders+=1;path=directory/'titles.csv';entries={}
@@ -48,7 +52,7 @@ def main():
             if not title.strip(' \u3000'):title=name;report('WARN',f'{label}: blank title; original name will be used')
             elif title!=title.strip(' \u3000'):report('WARN',f'{label}: leading/trailing title spaces')
             if title in used_titles:report('WARN',f'{label}: duplicate display title: {title}')
-            used_titles.add(title);check(title,label,bool(entry and entry.is_dir()))
+            used_titles.add(title);check(title,label,bool(entry and entry.is_dir()),True)
         for key,entry in entries.items():
             if key not in mapped:report('WARN',f'{entry}: unregistered; original name will be used');check(entry.name,str(entry),entry.is_dir())
     print(f'{errors} errors, {warnings} warnings, {folders} folders; font {manifest["sha256"]}')

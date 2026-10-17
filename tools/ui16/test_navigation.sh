@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export PYTHONUTF8=1
 cd "$(dirname "$0")/../.."
 mkdir -p build-ui16-host
 compiler_extra=()

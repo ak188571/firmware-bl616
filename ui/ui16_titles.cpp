@@ -1,5 +1,6 @@
 #ifdef UI16_SYSTEM_MENU
 #include "ui16_titles.h"
+#include "ui16_text_layout.h"
 #include <string_view>
 #include <utility>
 extern "C" {
@@ -49,11 +50,17 @@ bool Ui16TitlesParser::line() {
     if(tab==std::string::npos||line_.find('\t',tab+1)!=std::string::npos)return false;
     const std::string_view name(line_.data(),tab),title(line_.data()+tab+1,line_.size()-tab-1);
     if(name.empty()||name.size()>255||name.back()==' '||name.back()=='.'||title.size()>UI16_TITLE_MAX_BYTES||!valid_title(title))return false;
+    std::string decoded;
+    if(!ui16_decode_title(title,decoded))return false;
     for(unsigned char c:name)if(c<32||c>126||std::string_view("<>:\"/\\|?*").find(c)!=std::string_view::npos)return false;
     for(std::size_t i=0;i<games_.names.size();++i)if(equal_name(name,games_.names[i])) {
         if(seen_[i])return false;
         seen_[i]=true;
-        if(!blank_title(title))pending_[i]=std::string(title);
+        if(!blank_title(title)){
+            const bool folder=i<games_.directories.size()&&games_.directories[i];
+            if(!ui16_layout_text(decoded+(folder?"/":"")).valid)return false;
+            pending_[i]=decoded;
+        }
     }
     return true;
 }

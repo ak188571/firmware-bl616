@@ -30,6 +30,8 @@ def read_titles(path,header='name'):
         seen.add(name.lower())
         if len(title.encode())>MAX_TITLE_BYTES or any(ord(c)<32 or 0x7f<=ord(c)<=0x9f for c in title):
             raise ValueError(f'{path}:{line_no}: invalid title/control character or title exceeds {MAX_TITLE_BYTES} bytes')
+        try:decode_title(title)
+        except ValueError as e:raise ValueError(f'{path}:{line_no}: {e}') from e
         result.append((line_no,name,title))
     return result
 
@@ -64,3 +66,44 @@ def csv_paths(inputs):
         elif source.name=='titles.csv' and source.is_file():found.add(source.resolve())
         else:raise ValueError(f'Expected titles.csv or a ROM root folder: {source}')
     return sorted(found)
+
+
+def decode_title(raw):
+    """Decode only literal backslash-n and doubled backslash in the title field."""
+    out=[];i=0
+    while i<len(raw):
+        c=raw[i];i+=1
+        if c!='\\':out.append(c);continue
+        if i==len(raw):raise ValueError('incomplete title escape (use \\\\ for a literal backslash)')
+        c=raw[i];i+=1
+        if c=='n':out.append('\n')
+        elif c=='\\':out.append('\\')
+        else:raise ValueError('unknown title escape; only \\n and \\\\ are supported')
+    result=''.join(out)
+    layout_text(result) # Validate forced line breaks without a folder suffix.
+    return result
+
+
+def text_units(text):
+    return sum(1 if ord(c)<128 else 2 for c in text)
+
+
+def layout_text(text):
+    """Decoded display text -> (lines, clipped); matches ui16_text_layout.h."""
+    if '\n' in text:
+        lines=text.split('\n')
+        if len(lines)!=2:raise ValueError('at most one forced line break is allowed')
+        if any(not line.strip(' \u3000') for line in lines):raise ValueError('forced line break must not create an empty line')
+        if text_units(lines[0])>30 or text_units(lines[1])>29:
+            raise ValueError('forced lines exceed 30/29 halfwidth units (second line includes one-unit indentation)')
+        return lines,False
+    lines=[];pos=0
+    for width in (30,29):
+        start=pos;used=0
+        while pos<len(text):
+            advance=1 if ord(text[pos])<128 else 2
+            if used+advance>width:break
+            used+=advance;pos+=1
+        lines.append(text[start:pos])
+        if pos==len(text):return lines,False
+    return lines,True

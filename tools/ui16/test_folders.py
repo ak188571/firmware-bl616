@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import subprocess,sys,tempfile,unittest
+import os,subprocess,sys,tempfile,unittest
 from pathlib import Path
 from titles_common import read_titles,csv_paths,walk_directories
 
@@ -7,7 +7,7 @@ TOOLS=Path(__file__).resolve().parent
 
 
 def run(tool,*args):
-    return subprocess.run([sys.executable,str(TOOLS/tool),*map(str,args)],capture_output=True,text=True)
+    return subprocess.run([sys.executable,str(TOOLS/tool),*map(str,args)],capture_output=True,text=True,encoding='utf-8',env={**os.environ,'PYTHONUTF8':'1'})
 
 
 class FolderTests(unittest.TestCase):
@@ -17,16 +17,16 @@ class FolderTests(unittest.TestCase):
             (root/'root.nes').write_bytes(b'');(child/'xxx.NES').write_bytes(b'');(nested/'deep.nes').write_bytes(b'')
             (root/'titles.csv').write_text('name\ttitle\naction\tアクション\nroot.nes\tROOT\n',encoding='utf-8')
             (child/'titles.csv').write_text('name\ttitle\nnested\t日本\nxxx.nes\t日本、 "ABC"!\n',encoding='utf-8')
-            (nested/'titles.csv').write_text('name\ttitle\ndeep.nes\t\n')
+            (nested/'titles.csv').write_text('name\ttitle\ndeep.nes\t\n', encoding='utf-8')
             result=run('check_titles.py',root,'--core','nes')
             self.assertEqual(result.returncode,0,result.stdout+result.stderr)
             self.assertIn('3 folders',result.stdout)
             self.assertEqual(len(csv_paths([root])),3)
             self.assertEqual(read_titles(child/'titles.csv')[1][2],'日本、 "ABC"!')
-            (child/'titles.csv').write_text('name\ttitle\nroot.nes\tROOT\n')
+            (child/'titles.csv').write_text('name\ttitle\nroot.nes\tROOT\n', encoding='utf-8')
             self.assertNotEqual(run('check_titles.py',root,'--core','nes').returncode,0) # parent mapping never inherited
             for invalid in ['name,title\naction,ACTION\n','filename\ttitle\naction\tA\n','name\ttitle\naction/\tA\n','name\ttitle\naction/xxx.nes\tA\n','name\ttitle\naction\tA\nACTION\tB\n']:
-                (root/'titles.csv').write_text(invalid)
+                (root/'titles.csv').write_text(invalid, encoding='utf-8')
                 with self.assertRaises(ValueError):read_titles(root/'titles.csv')
 
     def test_migration_preview_apply_and_conflicts(self):
@@ -44,8 +44,8 @@ class FolderTests(unittest.TestCase):
             again=run('migrate_titles.py',root,'--apply');self.assertEqual(again.returncode,0);self.assertIn('Already migrated',again.stdout)
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);child=root/'action';child.mkdir()
-            for folder in [root,child]:(folder/'titles.tsv').write_text('filename\ttitle\na.nes\tA\n')
-            (child/'titles.csv').write_text('name\ttitle\na.nes\tB\n')
+            for folder in [root,child]:(folder/'titles.tsv').write_text('filename\ttitle\na.nes\tA\n', encoding='utf-8')
+            (child/'titles.csv').write_text('name\ttitle\na.nes\tB\n', encoding='utf-8')
             self.assertNotEqual(run('migrate_titles.py',root,'--apply').returncode,0)
             self.assertFalse((root/'titles.csv').exists()) # conflicts checked before any writes
 

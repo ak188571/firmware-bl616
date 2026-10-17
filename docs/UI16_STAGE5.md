@@ -146,3 +146,9 @@ git diff --cached --submodule=short
 git commit -m "Record verified UI16 stage 5 scrolling"
 git push fork main
 ```
+
+## 第5段階追加修正：最大2行・強制改行・字下げ
+
+従来の「1項目1行」「2行表示は今回追加しない」は、この追加修正により置き換える。
+自動折り返し、強制改行、2行目の字下げ、可変行数の縦スクロールを実装する。
+追加修正の適用・操作・検証手順はUI16_STAGE5_WRAP.mdを参照。

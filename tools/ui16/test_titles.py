@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import contextlib,hashlib,io,json,shutil,subprocess,sys,tempfile,unittest
+import os,contextlib,hashlib,io,json,shutil,subprocess,sys,tempfile,unittest
 from pathlib import Path
 from titles_common import read_titles
 import build_font
@@ -12,14 +12,14 @@ class TitlesTests(unittest.TestCase):
             root=Path(d);tsv=root/'titles.csv';(root/'game001.nes').write_bytes(b'')
             tsv.write_text('\ufeffname\ttitle\r\ngame001.nes\t日本「テスト」、ABC!\r\n',encoding='utf-8',newline='')
             self.assertEqual(read_titles(tsv)[0][2],'日本「テスト」、ABC!')
-            def check():return subprocess.run([sys.executable,str(Path(__file__).with_name('check_titles.py')),str(tsv),'--core','nes'],capture_output=True,text=True)
+            def check():return subprocess.run([sys.executable,str(Path(__file__).with_name('check_titles.py')),str(tsv),'--core','nes'],capture_output=True,text=True,encoding='utf-8',env={**os.environ,'PYTHONUTF8':'1'})
             self.assertEqual(check().returncode,0)
             for content in ['name\ttitle\na.nes\tx\nA.NES\ty\n','name\ttitle\n\tx\n','name\ttitle\na.nes\tx\ty\n','name\ttitle\na.nes\t'+('x'*513)]:
-                tsv.write_text(content)
+                tsv.write_text(content, encoding='utf-8')
                 with self.assertRaises(ValueError):read_titles(tsv)
-            tsv.write_text('name\ttitle\nmissing.nes\tABC\n');self.assertNotEqual(check().returncode,0)
-            tsv.write_text('name\ttitle\ngame001.nes\t😀\n');self.assertIn('U+1F600',check().stdout)
-            tsv.write_text('name\ttitle\ngame001.nes\t\n');r=check();self.assertEqual(r.returncode,0);self.assertIn('original name will be used',r.stdout)
+            tsv.write_text('name\ttitle\nmissing.nes\tABC\n', encoding='utf-8');self.assertNotEqual(check().returncode,0)
+            tsv.write_text('name\ttitle\ngame001.nes\t😀\n', encoding='utf-8');self.assertIn('U+1F600',check().stdout)
+            tsv.write_text('name\ttitle\ngame001.nes\t\n', encoding='utf-8');r=check();self.assertEqual(r.returncode,0);self.assertIn('original name will be used',r.stdout)
             tsv.write_bytes(b'name\ttitle\na.nes\t\xff')
             with self.assertRaises(UnicodeError):read_titles(tsv)
 
@@ -28,18 +28,18 @@ class TitlesTests(unittest.TestCase):
             root=Path(d);fw=root/'firmware';mon=root/'monitor';(fw/'ui').mkdir(parents=True);(mon/'src/iosys/ui16').mkdir(parents=True)
             for name in ['ui16_font_manifest.json','ui16_font_map.h','ui16_config.h']:shutil.copyfile(ROOT/'ui'/name,fw/'ui'/name)
             # Initial config can be generated from current hardware-profile values.
-            config=(ROOT/'ui/ui16_config.h').read_text()
+            config=(ROOT/'ui/ui16_config.h').read_text(encoding='utf-8')
             import re
             sv=''.join(f'`define UI_{key} {value}\n' for key,value in re.findall(r'inline constexpr int (\w+) = (\d+);',config))
-            (mon/'src/iosys/ui16/ui_config.svh').write_text(sv)
+            (mon/'src/iosys/ui16/ui_config.svh').write_text(sv, encoding='utf-8')
             roms=root/'nes';nested=roms/'action';nested.mkdir(parents=True)
             tsv=nested/'titles.csv'
             import gzip
             bank=json.loads(gzip.decompress((Path(__file__).with_name('shinonome16.json.gz')).read_bytes()))
-            known={e['cp'] for e in json.loads((fw/'ui/ui16_font_manifest.json').read_text())['glyphs']}
+            known={e['cp'] for e in json.loads((fw/'ui/ui16_font_manifest.json').read_text(encoding='utf-8'))['glyphs']}
             extra=next(chr(int(cp)) for cp in sorted(bank,key=int) if int(cp)>=0x4e00 and int(cp) not in known)
             tsv.write_text('name\ttitle\na.nes\t'+extra+'\n',encoding='utf-8')
-            original=json.loads((fw/'ui/ui16_font_manifest.json').read_text());old_root=build_font.ROOT;old_argv=sys.argv
+            original=json.loads((fw/'ui/ui16_font_manifest.json').read_text(encoding='utf-8'));old_root=build_font.ROOT;old_argv=sys.argv
             try:
                 build_font.ROOT=fw
                 sys.argv=['build_font.py','--monitor',str(mon),'--csv',str(roms),'--capacity','1024']

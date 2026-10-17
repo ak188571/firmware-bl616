@@ -8,37 +8,14 @@
 #include <limits>
 
 namespace {
-// Same UTF-8 validation and cell widths as the PC simulator.
-std::uint32_t next_utf8(std::string_view s, std::size_t &pos)
-{
-    const auto first = static_cast<unsigned char>(s[pos]);
-    if (first < 0x80) { ++pos; return first; }
-    const int n = first >= 0xc2 && first <= 0xdf ? 2 :
-                  first >= 0xe0 && first <= 0xef ? 3 :
-                  first >= 0xf0 && first <= 0xf4 ? 4 : 0;
-    if (!n || pos + n > s.size()) { ++pos; return 0xfffd; }
-    std::uint32_t cp = first & (0x7f >> n);
-    for (int i = 1; i < n; ++i) {
-        const auto c = static_cast<unsigned char>(s[pos + i]);
-        if ((c & 0xc0) != 0x80) { ++pos; return 0xfffd; }
-        cp = (cp << 6) | (c & 0x3f);
-    }
-    if ((n == 2 && cp < 0x80) || (n == 3 && cp < 0x800) ||
-        (n == 4 && cp < 0x10000) || (cp >= 0xd800 && cp <= 0xdfff) || cp > 0x10ffff) {
-        ++pos; return 0xfffd;
-    }
-    pos += n;
-    return cp;
-}
-
-void text(std::uint16_t *row, const char *label, bool selected)
+void text(std::uint16_t *row, const char *label, bool selected, int x = 2)
 {
     if (!label) return;
     const std::string_view s(label);
-    int x = 2;
     std::size_t pos = 0;
     while (pos < s.size()) {
-        auto cp = next_utf8(s, pos);
+        auto cp = ui16_next_utf8(s, pos);
+        if(cp==10)break;
         // The prototype font contains uppercase Latin letters only.
         // ASCII case and punctuation are preserved by the expanded font.
         const int width = cp < 0x80 ? 1 : 2;
@@ -68,16 +45,36 @@ const char *ui16_system_label(const Ui16MenuEntry &entry)
     }
 }
 
+std::string ui16_game_label(const Ui16GameList &games, std::size_t index)
+{
+    std::string label=index<games.titles.size()&&!games.titles[index].empty()?games.titles[index]:games.names[index];
+    if(index<games.directories.size()&&games.directories[index])label+="/";
+    return label;
+}
+
 int ui16_scroll_top(int selected, std::size_t count, int top)
 {
-    const int n=static_cast<int>(std::min<std::size_t>(count,std::numeric_limits<int>::max()));
-    const int max_top=std::max(0,n-UI16_MENU_CAPACITY);
-    top=std::max(0,std::min(top,max_top));
-    if(selected>=0 && selected<n) {
-        if(selected<top)top=selected;
-        else if(selected>=top+UI16_MENU_CAPACITY)top=selected-UI16_MENU_CAPACITY+1;
+    return ui16_variable_scroll_top(selected,static_cast<int>(std::min<std::size_t>(count,std::numeric_limits<int>::max())),top,[](int){return 1;});
+}
+int ui16_system_scroll_top(const Ui16MenuEntry *entries, std::size_t count, int selected, int top)
+{
+    int n=0;while(entries&&static_cast<std::size_t>(n)<count&&entries[n].id!=0)++n;
+    return ui16_variable_scroll_top(selected,n,top,[&](int i){return ui16_layout_text(ui16_system_label(entries[i])).count;});
+}
+int ui16_game_scroll_top(const Ui16GameList &games, int selected, int top)
+{
+    return ui16_variable_scroll_top(selected,static_cast<int>(games.names.size()),top,[&](int i){return ui16_layout_text(ui16_game_label(games,i)).count;});
+}
+static int draw_item(std::uint16_t *cells,int row,const std::string &label,bool selected)
+{
+    const auto layout=ui16_layout_text(label);
+    if(row+layout.count>MENU_ROWS-1)return 0;
+    for(int line=0;line<layout.count;++line){
+        const auto part=std::string(layout.lines[line]);
+        text(cells+(row+line)*TEXT_UNITS_PER_ROW,part.c_str(),selected,line?3:2);
+        if(line&&selected)cells[(row+line)*TEXT_UNITS_PER_ROW+2]=1u<<(12+ATTR_SELECTED_BIT);
     }
-    return std::min(top,max_top);
+    return layout.count;
 }
 
 void ui16_build_system_menu(const Ui16MenuEntry *entries, std::size_t count,
@@ -87,8 +84,7 @@ void ui16_build_system_menu(const Ui16MenuEntry *entries, std::size_t count,
     text(cells + TEXT_UNITS_PER_ROW, "SYSTEMS", false);
     std::size_t actual=0;
     while(entries && actual<count && entries[actual].id!=0)++actual;
-    if(top<0)top=ui16_scroll_top(selected_index,actual,0);
-    else top=ui16_scroll_top(-1,actual,top);
+    top=ui16_system_scroll_top(entries,actual,top<0?selected_index:-1,std::max(0,top));
     bool selected = false;
     int row = UI16_MENU_FIRST_ROW;
     for (std::size_t i = static_cast<std::size_t>(top); entries && i < actual && row < MENU_ROWS - 1; ++i) {
@@ -96,7 +92,9 @@ void ui16_build_system_menu(const Ui16MenuEntry *entries, std::size_t count,
         const bool select = selected_index == -1 ? entries[i].id > 0 && !selected :
                             selected_index >= 0 && i == static_cast<std::size_t>(selected_index);
         selected |= select;
-        text(cells + row++ * TEXT_UNITS_PER_ROW, ui16_system_label(entries[i]), select);
+        const int height=draw_item(cells,row,ui16_system_label(entries[i]),select);
+        if(!height)break;
+        row+=height;
     }
 }
 
@@ -129,13 +127,13 @@ void ui16_build_game_menu(const char *heading, const Ui16GameList &games, int se
 {
     for (auto &cell : cells) cell = 0;
     text(cells + TEXT_UNITS_PER_ROW, heading, false);
-    top=ui16_scroll_top(top<0?selected:-1,games.names.size(),std::max(0,top));
+    top=ui16_game_scroll_top(games,top<0?selected:-1,std::max(0,top));
     if (games.status == Ui16ListStatus::Ready) {
-        for (std::size_t i = static_cast<std::size_t>(top); i < games.names.size() && i < static_cast<std::size_t>(top+UI16_MENU_CAPACITY); ++i) {
-            std::string display=i < games.titles.size() && !games.titles[i].empty() ? games.titles[i] : games.names[i];
-            if(i<games.directories.size() && games.directories[i])display+="/";
-            text(cells + (UI16_MENU_FIRST_ROW + i - top) * TEXT_UNITS_PER_ROW,
-                 display.c_str(), selected >= 0 && i == static_cast<std::size_t>(selected));
+        int row=UI16_MENU_FIRST_ROW;
+        for(std::size_t i=static_cast<std::size_t>(top);i<games.names.size();++i){
+            const int height=draw_item(cells,row,ui16_game_label(games,i),selected>=0&&i==static_cast<std::size_t>(selected));
+            if(!height)break;
+            row+=height;
         }
     } else {
         const char *message = games.status == Ui16ListStatus::Empty ? "EMPTY FOLDER" :
