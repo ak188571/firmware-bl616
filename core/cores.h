@@ -36,6 +36,7 @@ struct PcxtMenu: Menu {
     virtual void render() override;
     virtual std::vector<int> get_options() override;
     virtual bool on_choose(int idx) override;
+    bool fullscreen_dialog(int idx) const override {return idx==0||idx==1;}
 };
 
 Menu *create_default_menu(const char *imgdir);

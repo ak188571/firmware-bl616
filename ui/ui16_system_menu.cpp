@@ -140,8 +140,9 @@ void ui16_build_game_menu(const char *heading, const Ui16GameList &games, int se
                               games.status == Ui16ListStatus::DirectoryError ? "DIRECTORY ERROR" : "READ ERROR";
         text(cells + UI16_MENU_FIRST_ROW * TEXT_UNITS_PER_ROW, message, false);
     }
-    text(cells + (MENU_ROWS - 1) * TEXT_UNITS_PER_ROW,
-         games.navigation_error ? u8"X/Y 戻る NAV ERROR" : games.titles_error ? u8"X/Y 戻る CSV ERROR" : games.more ? u8"X/Y 戻る LIST LIMIT" : u8"X/Y 戻る", false);
+    const std::string footer=games.launch_error?std::string(u8"X/Y 戻る ")+games.launch_error:
+        games.navigation_error?u8"X/Y 戻る NAV ERROR":games.titles_error?u8"X/Y 戻る CSV ERROR":games.more?u8"X/Y 戻る LIST LIMIT":u8"X/Y 戻る";
+    text(cells+(MENU_ROWS-1)*TEXT_UNITS_PER_ROW,footer.c_str(),false);
 }
 
 void ui16_send_game_menu(const char *heading, const Ui16GameList &games, int selected, int top)

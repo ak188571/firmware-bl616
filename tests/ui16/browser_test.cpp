@@ -118,7 +118,8 @@ int main() {
     browser.update(0,560,load);
     assert(browser.update(b,570,load,(void*)"sd:snes") && browser.selected_file()==0 && opens==2);
     browser.update(0,580,load);
-    assert(!browser.update(b,590,load) && opens==2); // game B never loads/reopens ROMs
+    assert(!browser.update(b,590,load) && opens==2); // Hardware loading is handled by Ui16Runtime.
+    Ui16LaunchRequest request;assert(browser.take_launch_request(request)&&request.core_id==2&&request.filename=="ABC.sfc");
     browser.update(0,600,load);
     browser.update(a,610,load);
     browser.update(0,620,load);

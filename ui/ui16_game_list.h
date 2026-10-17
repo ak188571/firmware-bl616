@@ -14,6 +14,7 @@ struct Ui16GameList {
     bool titles_error = false;
     std::vector<bool> directories; // Parallel to names; classification comes from FatFs.
     bool navigation_error = false;
+    const char *launch_error = nullptr; // Static error label supplied by Ui16Runtime.
 };
 
 bool ui16_is_rom_file(int core_id, const char *name);

@@ -27,7 +27,7 @@ Menu* menu_current() {
 
 bool menu_is_active() {
     return !menu_stack.empty();
-} 
+}
 
 void menu_input_loop() {
     if (!menu_is_active())
@@ -42,7 +42,7 @@ void menu_input_loop() {
             menu_current()->redraw = false;
         }
 
-        uint16_t joy1=0, joy2=0, hid1=0, hid2=0;    
+        uint16_t joy1=0, joy2=0, hid1=0, hid2=0;
         get_joypad_states(&joy1, &joy2, &hid1, &hid2);
         joy1 |= hid1;
         joy2 |= hid2;
@@ -53,6 +53,11 @@ void menu_input_loop() {
             overlay(0);    // turn off OSD
             delay(300);
         }
+
+#ifdef UI16_SYSTEM_MENU
+        // In-game legacy popup: X/Y returns to the game without replacing its core.
+        if((joy1|joy2)&0x0202){overlay(0);return;}
+#endif
 
         if ((joy1 & 0x10) || (joy2 & 0x10)) {   // up
             if (active > 0) active--;

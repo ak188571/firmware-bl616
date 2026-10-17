@@ -8,6 +8,22 @@ extern "C" {
 }
 #include "utils.h"
 #include "overlay.h"
+#ifdef UI16_SYSTEM_MENU
+#include "ui16_osd.h"
+static TaskHandle_t osd_capture_owner=nullptr;
+static bool capture_here(){return ui16_osd_capture_active()&&xTaskGetCurrentTaskHandle()==osd_capture_owner;}
+void overlay_osd_capture_begin(){osd_capture_owner=xTaskGetCurrentTaskHandle();ui16_osd_capture_begin();}
+void overlay_osd_capture_end(){ui16_osd_capture_end();osd_capture_owner=nullptr;}
+void overlay_osd_window(unsigned x,unsigned y,unsigned width,unsigned height){
+    taskENTER_CRITICAL();fpga_tx_header(0x10,5);fpga_tx_byte(x);fpga_tx_byte(y);fpga_tx_byte(width);fpga_tx_byte(height);taskEXIT_CRITICAL();
+}
+void overlay_osd_key(unsigned key){
+    taskENTER_CRITICAL();fpga_tx_header(0x11,3);fpga_tx_byte(key>>8);fpga_tx_byte(key);taskEXIT_CRITICAL();
+}
+void overlay_osd_neutral(){
+    taskENTER_CRITICAL();fpga_tx_header(9,5);for(int i=0;i<4;++i)fpga_tx_byte(0);taskEXIT_CRITICAL();
+}
+#endif
 
 /////////////////////////////////////////////////////////////////////////////////
 // Overlay and other core control over UART
@@ -19,6 +35,9 @@ int overlay_on() {
 }
 
 void overlay_cursor(int col, int row) {
+#ifdef UI16_SYSTEM_MENU
+    if(capture_here()){ui16_osd_capture_cursor(col,row);return;}
+#endif
     // uart1 command: 4 x[7:0] y[7:0]
     taskENTER_CRITICAL();
     fpga_tx_header(0x04, 3);
@@ -51,6 +70,9 @@ void overlay_printf(const char *fmt, ...) {
     vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
 
+#ifdef UI16_SYSTEM_MENU
+    if(capture_here()){ui16_osd_capture_text(buf);return;}
+#endif
     taskENTER_CRITICAL();
     int len = strlen(buf);
     fpga_tx_header(0x05, len+1);
@@ -61,6 +83,9 @@ void overlay_printf(const char *fmt, ...) {
 }
 
 void overlay_clear() {
+#ifdef UI16_SYSTEM_MENU
+    if(capture_here()){ui16_osd_capture_clear();return;}
+#endif
     for (int i = 0; i < 28; i++) {
         overlay_cursor(0, i);
         //              01234567890123456789012345678901
@@ -154,10 +179,12 @@ void overlay_message(const char *msg, int center) {
 
 // turn overlay on/off
 void overlay(int state) {
+#ifdef UI16_SYSTEM_MENU
+    overlay_osd_neutral();
+#endif
     taskENTER_CRITICAL();
     _overlay_on = state;
     fpga_tx_header(0x08, 2);
     fpga_tx_byte(state);        
     taskEXIT_CRITICAL();
 }
-

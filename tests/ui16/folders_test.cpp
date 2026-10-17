@@ -75,7 +75,8 @@ int main(){
     assert(press(UI16_BUTTON_DOWN)&&b.selected_file()==1);
     assert(press(UI16_BUTTON_CONFIRM)&&b.relative_path()=="puzzle");
     assert(press(UI16_BUTTON_BACK)&&b.selected_file()==1);
-    press(UI16_BUTTON_DOWN);const auto before=loaded.size();assert(!press(UI16_BUTTON_CONFIRM)&&loaded.size()==before); // ROM is not launched.
+    press(UI16_BUTTON_DOWN);const auto before=loaded.size();assert(!press(UI16_BUTTON_CONFIRM)&&loaded.size()==before); // Hardware loading is handled separately.
+    Ui16LaunchRequest request;assert(b.take_launch_request(request)&&request.core_id==1&&request.filename=="root.nes");
     press(UI16_BUTTON_DOWN);assert(press(UI16_BUTTON_CONFIRM)&&b.game_list().status==Ui16ListStatus::Empty);
     assert(press(UI16_BUTTON_BACK)&&b.selected_file()==3);
     press(UI16_BUTTON_DOWN);assert(press(UI16_BUTTON_CONFIRM)&&b.game_list().status==Ui16ListStatus::DirectoryError);
@@ -94,5 +95,5 @@ int main(){
     std::string long_name(255,'x');tap(UI16_BUTTON_CONFIRM,&long_name);tap(UI16_BUTTON_CONFIRM,&long_name);tap(UI16_BUTTON_CONFIRM,&long_name);
     assert(limited.relative_path().size()==511);assert(tap(UI16_BUTTON_CONFIRM,&long_name)&&limited.game_list().navigation_error&&limited.relative_path().size()==511);
     assert(!ui16_valid_component("..")&&!ui16_valid_component("a/b")&&!ui16_valid_component("bad\\path"));
-    std::puts("Folder tests passed: actual FatFs/CSV adapters, translated folders, nested Back/restore, held buttons, empty/error pages, ROM no-op, depth/path bounds");
+    std::puts("Folder tests passed: actual FatFs/CSV adapters, translated folders, nested Back/restore, held buttons, empty/error pages, ROM request, depth/path bounds");
 }

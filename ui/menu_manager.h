@@ -12,6 +12,9 @@ struct Menu {
         redraw = true;
     }
     virtual ~Menu() = default;
+    virtual bool on_adjust(int,int) {return false;}
+    virtual int osd_width() const {return 0;}
+    virtual bool fullscreen_dialog(int) const {return false;}
     virtual void render() = 0;
     virtual std::vector<int> get_options() = 0;   // return list of choice rows
     virtual bool on_choose(int idx) = 0;          // called when a choice is selected
@@ -44,4 +47,3 @@ struct DefaultMenu: Menu {
         return true;
     }
 };
-

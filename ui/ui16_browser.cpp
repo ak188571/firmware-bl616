@@ -1,5 +1,6 @@
 #ifdef UI16_SYSTEM_MENU
 #include "ui16_browser.h"
+#include <utility>
 
 Ui16Browser::Ui16Browser(const Ui16MenuEntry *entries, std::size_t count, int initial)
     : entries_(entries), count_(entries ? count : 0), systems_(count_, initial)
@@ -29,6 +30,17 @@ void Ui16Browser::load(Ui16GameLoader loader, void *context, int selected)
     file_top_=ui16_game_scroll_top(games_,files_.selected(), file_top_);
 }
 
+bool Ui16Browser::take_launch_request(Ui16LaunchRequest &request)
+{
+    if(!pending_launch_.core_id)return false;
+    request=std::move(pending_launch_);pending_launch_={};return true;
+}
+void Ui16Browser::resume_input(std::uint16_t buttons)
+{
+    previous_buttons_=buttons;
+    systems_.update(0,0);files_.update(0,0);pending_launch_={};
+}
+
 bool Ui16Browser::update(std::uint16_t buttons, std::uint32_t now_ms,
                          Ui16GameLoader loader, void *context)
 {
@@ -38,6 +50,7 @@ bool Ui16Browser::update(std::uint16_t buttons, std::uint32_t now_ms,
     previous_buttons_ = buttons;
     const bool both = (buttons & UI16_BUTTON_CONFIRM) && (buttons & UI16_BUTTON_BACK);
     if (!both && in_games_ && (pressed & UI16_BUTTON_BACK)) {
+        pending_launch_={};
         if(levels_.size()>1) {
             const auto child=levels_.back().component;
             levels_.pop_back();
@@ -86,10 +99,21 @@ bool Ui16Browser::update(std::uint16_t buttons, std::uint32_t now_ms,
             load(loader,context);
             return true;
         }
+        if(selected>=0&&static_cast<std::size_t>(selected)<games_.names.size()&&
+           (static_cast<std::size_t>(selected)>=games_.directories.size()||!games_.directories[selected])&&
+           games_.status==Ui16ListStatus::Ready){
+            const auto *entry=active_system();
+            if(entry&&ui16_valid_component(games_.names[selected])&&ui16_is_rom_file(entry->id,games_.names[selected].c_str())){
+                games_.launch_error=nullptr;
+                pending_launch_={entry->id,relative_path_,games_.names[selected]};
+                return false; // Confirmation wins over a simultaneous direction.
+            }
+        }
     }
     const bool changed=in_games_ ? files_.update(buttons, now_ms) : systems_.update(buttons, now_ms);
     if(changed && in_games_) {
         games_.navigation_error=false;
+        games_.launch_error=nullptr;
         file_top_=ui16_game_scroll_top(games_,files_.selected(),file_top_);
     } else if(changed) {
         system_top_=ui16_system_scroll_top(entries_,count_,systems_.selected(),system_top_);

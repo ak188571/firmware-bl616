@@ -6,6 +6,7 @@
 extern "C" {
 #include "bflb_gpio.h"
 #include "bflb_uart.h"
+#include "bflb_mtimer.h"
 
 #include <FreeRTOS.h>
 #include "task.h"

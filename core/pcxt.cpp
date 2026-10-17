@@ -26,6 +26,7 @@ bool mount_floppy(int drive, const char *fname) {
     // close any open image
     if (floppy[drive]) {
         f_close(&f_floppy[drive]);
+        floppy[drive]=false;
     }
 
     FILINFO fno;
@@ -71,16 +72,17 @@ bool mount_floppy(int drive, const char *fname) {
         heads = 2;
     } else {
         overlay_message( "Unsupported image size", 1);
-        return -1;
+        f_close(&f_floppy[drive]);
+        return false;
     }
     DEBUG("set floppy parameters\n");
     uint16_t off = drive ? 0xf0 : 0x00;
     IOWR(0xf200 + off, 1);    // media present
     IOWR(0xf201 + off, 0);    // write protect
     IOWR(0xf202 + off, cylinders);
-    IOWR(0xf203 + off, sectors_per_track);  
+    IOWR(0xf203 + off, sectors_per_track);
     IOWR(0xf204 + off, total_sectors);
-    IOWR(0xf205 + off, heads);   
+    IOWR(0xf205 + off, heads);
 
     floppy[drive] = true;
     std::string s = fname;
@@ -121,13 +123,13 @@ int loadpc(const char *fname) {
             if (f_read(&fcore, fbuf, 1024, &br) != FR_OK)
                 break;
             send_fbuf_data(br);
-        } while (br == 1024);        
+        } while (br == 1024);
         f_close(&fcore);
         DEBUG("load BIOS done\n");
     }
 
     // mount floppy image
-    mount_floppy(0, fname);
+    if(!mount_floppy(0, fname))return -1;
 
     if (!core_running) {
         set_loading_state(0);
@@ -187,7 +189,7 @@ bool PcxtMenu::on_choose(int idx) {
                 overlay_message("Only .img floppy supported", 1);
                 return false;
             }
-        } 
+        }
         return false;               // cancelled
     } else if (idx == 2) {
         overlay_printf("Reset Core\n");
@@ -201,4 +203,3 @@ bool PcxtMenu::on_choose(int idx) {
     }
     return false;
 }
-

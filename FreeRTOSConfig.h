@@ -132,4 +132,8 @@ void vApplicationSleep(uint32_t xExpectedIdleTime);
 
 // #define portUSING_MPU_WRAPPERS
 
+#ifndef INCLUDE_xTaskGetCurrentTaskHandle
+#define INCLUDE_xTaskGetCurrentTaskHandle 1
+#endif
+
 #endif /* FREERTOS_CONFIG_H */

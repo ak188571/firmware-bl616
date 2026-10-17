@@ -131,3 +131,8 @@ git push fork main
 ```
 
 適用script、patch、バックアップ、build/obj_dir/__pycache__は追加しない。
+
+## 第6段階適用後
+
+ROM起動・ゲーム内OSD・UI16一覧への復帰はUI16_STAGE6.mdを参照。
+第6段階ではROMをA/Bで決定して起動できる。

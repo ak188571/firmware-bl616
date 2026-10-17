@@ -30,7 +30,7 @@ if(TANG_BOARD STREQUAL "mega60k")
     add_definitions(-DTANG_MEGA60K)
 elseif(TANG_BOARD STREQUAL "mega138k")
     add_definitions(-DTANG_MEGA138K)
-elseif(TANG_BOARD STREQUAL "console60k") 
+elseif(TANG_BOARD STREQUAL "console60k")
     add_definitions(-DTANG_CONSOLE60K)
 elseif(TANG_BOARD STREQUAL "console138k")
     add_definitions(-DTANG_CONSOLE138K)
@@ -48,7 +48,7 @@ sdk_add_include_directories(
 )
 
 # Add source files
-file(GLOB_RECURSE MY_SOURCES
+file(GLOB_RECURSE MY_SOURCES CONFIGURE_DEPENDS
     "usb/*.cpp"
     "fpga/*.cpp"
     "ui/*.cpp"
@@ -60,4 +60,3 @@ target_sources(app PRIVATE ${MY_SOURCES})
 sdk_set_main_file(main.cpp)
 
 project(tangcore CXX)
-
