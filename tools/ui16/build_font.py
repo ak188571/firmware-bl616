@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--monitor', type=Path, required=True)
-    p.add_argument('--tsv', type=Path, action='append', default=[])
+    p.add_argument('--csv', type=Path, action='append', default=[], help='titles.csv or ROM root folder (recursive)')
     p.add_argument('--capacity', type=int, choices=[256,512,1024,2048,4096], default=1024)
     a = p.parse_args()
     fontdir = a.monitor / 'src/iosys/ui16'
@@ -29,11 +29,11 @@ def main():
     seen = {e['cp'] for e in entries}
     required = set(range(32,127)) | {0x25a1}
     required |= {int(cp) for cp in bank if 0x3000 <= int(cp) <= 0x30ff}
-    # Validate TSV structure before generating any output. ROM checks are separate.
-    from titles_common import read_tsv
-    for path in a.tsv:
-        for _, filename, title in read_tsv(path):
-            required.update(map(ord,title if title.strip(' \u3000') else filename))
+    # Validate strict tab-separated CSV before generating any output.
+    from titles_common import read_titles,csv_paths
+    for path in csv_paths(a.csv):
+        for _, name, title in read_titles(path):
+            required.update(map(ord,title if title.strip(' \u3000') else name))
     missing = [cp for cp in sorted(required-seen) if str(cp) not in bank]
     if missing:
         raise ValueError('No source bitmap: '+', '.join(f'U+{cp:04X} {chr(cp)}' for cp in missing))

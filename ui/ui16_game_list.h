@@ -10,9 +10,12 @@ struct Ui16GameList {
     std::vector<std::string> names;
     Ui16ListStatus status = Ui16ListStatus::Empty;
     bool more = false;
-    std::vector<std::string> titles; // Display names only; names always retains ROM filenames.
+    std::vector<std::string> titles; // Display names only; names retains original file/folder names.
     bool titles_error = false;
+    std::vector<bool> directories; // Parallel to names; classification comes from FatFs.
+    bool navigation_error = false;
 };
 
 bool ui16_is_rom_file(int core_id, const char *name);
+bool ui16_valid_component(const std::string &name);
 Ui16GameList ui16_read_game_list(const char *path, int core_id);

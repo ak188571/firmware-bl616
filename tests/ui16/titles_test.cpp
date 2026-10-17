@@ -33,19 +33,19 @@ static bool parse(const std::string &text,Ui16GameList &g){
 static unsigned glyph(unsigned cp){for(auto e:ui16_font_map)if(e.codepoint==cp)return e.glyph;assert(false);return 0;}
 int main(){
     Ui16GameList g;g.status=Ui16ListStatus::Ready;g.names={"GAME001.nes","game002.nes","game003.nes"};
-    assert(parse(u8"\xef\xbb\xbf" "filename\ttitle\r\ngame001.NES\t日本「テスト」、ABC!\r\ngame002.nes\t　 \r\n",g));
+    assert(parse(u8"\xef\xbb\xbf" "name\ttitle\r\ngame001.NES\t日本「テスト」、ABC!\r\ngame002.nes\t　 \r\n",g));
     assert(g.titles[0]==u8"日本「テスト」、ABC!"&&g.titles[1].empty()&&g.titles[2].empty());
-    for(const auto &bad:std::vector<std::string>{"", "wrong\ttitle\n", "filename\ttitle\n\tx\n", "filename\ttitle\n../bad.nes\tx\n", "filename\ttitle\nA.nes\tx\ty\n", "filename\ttitle\nGAME001.nes\tx\ngame001.NES\ty\n",std::string("filename\ttitle\nA.nes\t")+"\xc0\x80",std::string("filename\ttitle\nA.nes\t")+std::string(513,'A')}){
+    for(const auto &bad:std::vector<std::string>{"", "wrong\ttitle\n", "name\ttitle\n\tx\n", "name\ttitle\n../bad.nes\tx\n", "name\ttitle\nA.nes\tx\ty\n", "name\ttitle\nGAME001.nes\tx\ngame001.NES\ty\n",std::string("name\ttitle\nA.nes\t")+"\xc0\x80",std::string("name\ttitle\nA.nes\t")+std::string(513,'A')}){
         auto copy=g;const auto before=copy.titles;assert(!parse(bad,copy)&&copy.titles==before);
     }
-    assert(parse("filename\ttitle",g)); // Header-only file, no final newline.
-    open_result=FR_NO_FILE;closed=0;ui16_load_titles("sd:nes/titles.tsv",g);assert(!g.titles_error&&g.titles.empty()&&closed==0);
+    assert(parse("name\ttitle",g)); // Header-only file, no final newline.
+    open_result=FR_NO_FILE;closed=0;ui16_load_titles("sd:nes/titles.csv",g);assert(!g.titles_error&&g.titles.empty()&&closed==0);
     open_result=FR_DISK_ERR;ui16_load_titles("x",g);assert(g.titles_error);
-    open_result=FR_OK;file_data="filename\ttitle\ngame001.nes\tA\n";read_result=FR_DISK_ERR;ui16_load_titles("x",g);assert(g.titles_error&&g.titles.empty());
+    open_result=FR_OK;file_data="name\ttitle\ngame001.nes\tA\n";read_result=FR_DISK_ERR;ui16_load_titles("x",g);assert(g.titles_error&&g.titles.empty());
     read_result=FR_OK;close_result=FR_DISK_ERR;ui16_load_titles("x",g);assert(g.titles_error&&g.titles.empty());
-    close_result=FR_OK;file_data="filename\ttitle\ngame001.nes\tA\nbad\n";ui16_load_titles("x",g);assert(g.titles_error&&g.titles.empty());
-    file_data="filename\ttitle\n"+std::string(UI16_TSV_MAX_BYTES,'\n');ui16_load_titles("x",g);assert(g.titles_error);
-    file_data=u8"filename\ttitle\ngame001.nes\t日本「ヲ」、abc!\ngame002.nes\t\n";ui16_load_titles("x",g);assert(!g.titles_error);
+    close_result=FR_OK;file_data="name\ttitle\ngame001.nes\tA\nbad\n";ui16_load_titles("x",g);assert(g.titles_error&&g.titles.empty());
+    file_data="name\ttitle\n"+std::string(UI16_TSV_MAX_BYTES,'\n');ui16_load_titles("x",g);assert(g.titles_error);
+    file_data=u8"name\ttitle\ngame001.nes\t日本「ヲ」、abc!\ngame002.nes\t\n";ui16_load_titles("x",g);assert(!g.titles_error);
     assert(g.names[0]=="GAME001.nes"&&g.titles[0]==u8"日本「ヲ」、abc!");
     std::uint16_t cells[CELL_COUNT];ui16_build_game_menu("NES",g,0,cells);
     assert((cells[3*32+2]&UI16_GLYPH_MASK)==glyph(U'日'));

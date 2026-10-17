@@ -385,7 +385,7 @@ static void uart1_rx_task(void *pvParameters)
 }
 
 #ifdef UI16_SYSTEM_MENU
-static Ui16GameList ui16_load_for_core(int core_id, void *)
+static Ui16GameList ui16_load_for_core(int core_id, const char *relative_path, void *)
 {
     const auto *info = find_core_by_id(core_id);
     if (!info) {
@@ -393,9 +393,10 @@ static Ui16GameList ui16_load_for_core(int core_id, void *)
         result.status = Ui16ListStatus::DirectoryError;
         return result;
     }
-    const std::string path = std::string(drv) + info->rom_dir;
+    std::string path = std::string(drv) + info->rom_dir;
+    if(relative_path && *relative_path)path += std::string("/") + relative_path;
     auto games = ui16_read_game_list(path.c_str(), core_id);
-    ui16_load_titles((path + "/titles.tsv").c_str(), games);
+    ui16_load_titles((path + "/titles.csv").c_str(), games);
     return games;
 }
 #endif
@@ -463,14 +464,14 @@ static void main_task(void *pvParameters)
         fpga_use_ui16_display(true);
         const auto redraw = [&]() {
             if (browser.in_games()) {
-                ui16_send_game_menu(ui16_system_label(*browser.active_system()),
+                ui16_send_game_menu(browser.heading(),
                                     browser.game_list(), browser.selected_file());
             } else {
                 ui16_send_system_menu(entries, count, browser.selected_system());
             }
         };
         redraw();
-        // Stage 3: B enters the game list, A returns; ROM loading is not connected.
+        // B enters a system/folder; A returns one level. ROM loading is not connected.
         for (;;) {
             uint16_t joy1 = 0, joy2 = 0, hid1 = 0, hid2 = 0;
             get_joypad_states(&joy1, &joy2, &hid1, &hid2);

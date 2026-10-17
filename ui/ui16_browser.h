@@ -4,7 +4,9 @@
 
 inline constexpr std::uint16_t UI16_BUTTON_CONFIRM = 0x0001; // B
 inline constexpr std::uint16_t UI16_BUTTON_BACK = 0x0100;    // A
-using Ui16GameLoader = Ui16GameList (*)(int core_id, void *context);
+inline constexpr std::size_t UI16_MAX_FOLDER_DEPTH = 16;
+inline constexpr std::size_t UI16_MAX_RELATIVE_PATH = 511;
+using Ui16GameLoader = Ui16GameList (*)(int core_id, const char *relative_path, void *context);
 
 // Retains button edges across screen transitions; never starts a ROM.
 class Ui16Browser {
@@ -17,6 +19,8 @@ public:
     int selected_file() const { return files_.selected(); }
     const Ui16MenuEntry *active_system() const;
     const Ui16GameList &game_list() const { return games_; }
+    const std::string &relative_path() const { return relative_path_; }
+    const char *heading() const;
 
 private:
     const Ui16MenuEntry *entries_;
@@ -26,4 +30,8 @@ private:
     Ui16GameList games_;
     std::uint16_t previous_buttons_ = 0;
     bool in_games_ = false;
+    struct Location { std::string component; std::string heading; int selected; };
+    std::vector<Location> levels_;
+    std::string relative_path_;
+    void load(Ui16GameLoader loader, void *context, int selected = 0);
 };

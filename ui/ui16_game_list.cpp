@@ -33,6 +33,13 @@ bool ui16_is_rom_file(int core_id, const char *name)
     }
 }
 
+bool ui16_valid_component(const std::string &name)
+{
+    if(name.empty()||name.size()>255||name=="."||name==".."||name.back()==' '||name.back()=='.')return false;
+    for(unsigned char c:name)if(c<32||c>126||std::strchr("<>:\"/\\|?*",c))return false;
+    return true;
+}
+
 Ui16GameList ui16_read_game_list(const char *path, int core_id)
 {
     Ui16GameList result;
@@ -48,16 +55,20 @@ Ui16GameList ui16_read_game_list(const char *path, int core_id)
             break;
         }
         if (!info.fname[0]) break;
-        if ((info.fattrib & (AM_DIR | AM_HID | AM_SYS)) || !ui16_is_rom_file(core_id, info.fname)) continue;
+        if ((info.fattrib & (AM_HID | AM_SYS)) || std::strcmp(info.fname,".")==0 || std::strcmp(info.fname,"..")==0) continue;
+        const bool is_directory = (info.fattrib & AM_DIR) != 0;
+        if (!is_directory && !ui16_is_rom_file(core_id, info.fname)) continue;
         if (result.names.size() == UI16_GAME_CAPACITY) {
             result.more = true;
             break;
         }
         result.names.emplace_back(info.fname);
+        result.directories.push_back(is_directory);
     }
     if (f_closedir(&directory) != FR_OK) result.status = Ui16ListStatus::ReadError;
     if (result.status == Ui16ListStatus::ReadError) {
         result.names.clear();
+        result.directories.clear();
         result.more = false;
     } else {
         result.status = result.names.empty() ? Ui16ListStatus::Empty : Ui16ListStatus::Ready;

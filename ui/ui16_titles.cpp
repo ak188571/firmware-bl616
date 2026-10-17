@@ -42,7 +42,7 @@ bool Ui16TitlesParser::line() {
     if(first_) {
         first_=false;
         if(line_.compare(0,3,"\xef\xbb\xbf")==0)line_.erase(0,3);
-        return line_=="filename\ttitle";
+        return line_=="name\ttitle";
     }
     if(line_.empty())return true;
     const auto tab=line_.find('\t');

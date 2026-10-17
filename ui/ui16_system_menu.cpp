@@ -113,16 +113,18 @@ void ui16_build_game_menu(const char *heading, const Ui16GameList &games, int se
     text(cells + TEXT_UNITS_PER_ROW, heading, false);
     if (games.status == Ui16ListStatus::Ready) {
         for (std::size_t i = 0; i < games.names.size() && i < UI16_GAME_CAPACITY; ++i) {
+            std::string display=i < games.titles.size() && !games.titles[i].empty() ? games.titles[i] : games.names[i];
+            if(i<games.directories.size() && games.directories[i])display+="/";
             text(cells + (UI16_MENU_FIRST_ROW + i) * TEXT_UNITS_PER_ROW,
-                 (i < games.titles.size() && !games.titles[i].empty() ? games.titles[i] : games.names[i]).c_str(), selected >= 0 && i == static_cast<std::size_t>(selected));
+                 display.c_str(), selected >= 0 && i == static_cast<std::size_t>(selected));
         }
     } else {
-        const char *message = games.status == Ui16ListStatus::Empty ? "NO ROM FILES" :
+        const char *message = games.status == Ui16ListStatus::Empty ? "EMPTY FOLDER" :
                               games.status == Ui16ListStatus::DirectoryError ? "DIRECTORY ERROR" : "READ ERROR";
         text(cells + UI16_MENU_FIRST_ROW * TEXT_UNITS_PER_ROW, message, false);
     }
     text(cells + (MENU_ROWS - 1) * TEXT_UNITS_PER_ROW,
-         games.titles_error ? "A BACK  TSV ERROR" : games.more ? "A BACK  MORE FILES" : "A BACK", false);
+         games.navigation_error ? "A BACK  NAV ERROR" : games.titles_error ? "A BACK  CSV ERROR" : games.more ? "A BACK  MORE ITEMS" : "A BACK", false);
 }
 
 void ui16_send_game_menu(const char *heading, const Ui16GameList &games, int selected)

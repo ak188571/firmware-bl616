@@ -41,7 +41,7 @@ void fpga_tx_byte(std::uint8_t value) { assert(critical_depth==1); bytes.push_ba
 void fpga_tx_header(int cmd,int len) {
     fpga_tx_byte(0xaa); fpga_tx_byte(len>>8); fpga_tx_byte(len); fpga_tx_byte(cmd);
 }
-static Ui16GameList load(int core,void *context) {
+static Ui16GameList load(int core,const char *,void *context) {
     last_core = core;
     return ui16_read_game_list(static_cast<const char*>(context),core);
 }
@@ -80,8 +80,8 @@ int main() {
     directory={{"ABC.nes"},{"DEF.NES"},{"readme.txt"},{"wrong.sfc"},
                {"SUB.nes",AM_DIR},{"hidden.nes",AM_HID},{"system.nes",AM_SYS},{long_name}};
     auto games=ui16_read_game_list("sd:nes",1);
-    assert(games.status==Ui16ListStatus::Ready && games.names.size()==3 && !games.more);
-    assert(games.names[0]=="ABC.nes" && games.names[1]=="DEF.NES" && games.names[2]==long_name);
+    assert(games.status==Ui16ListStatus::Ready && games.names.size()==4 && !games.more);
+    assert(games.names[0]=="ABC.nes" && games.names[1]=="DEF.NES" && games.names[3]==long_name);
     assert(opened_path=="sd:nes" && opens==1 && closes==1);
     reset_fs(); for(int i=0;i<10;++i) directory.push_back({"ABC.nes"});
     games=ui16_read_game_list("sd:nes",1);

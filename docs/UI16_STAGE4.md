@@ -1,5 +1,7 @@
 # UI16 段階4：TSVタイトルと12 bit glyph
 
+> これは旧形式の記録です。CSV・フォルダ対応適用後の現行手順は `UI16_STAGE4_FOLDERS.md` を参照してください。現行の実機はtab区切りのtitles.csv（name/title列）を使用します。
+
 基準：firmware-bl616 `b8a3e2d1728c1fc2c8072a9064ea2b7099ce1b0e`、monitorcore `e472e929d63a3bda85a2e67f83c51d1aa79309fd`。
 今回はFPGAとBL616の両方を更新する。旧8 bit版との混在は不可。
 
