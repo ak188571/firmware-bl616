@@ -1,3 +1,5 @@
+#include "ui16_cell.h"
+#include "ui16_font_map.h"
 #include "ui16_navigation.h"
 #include "ui16_display_mode.h"
 #include "utils.h"
@@ -76,19 +78,19 @@ int main()
     for (int selected=0; selected<8; ++selected) {
         ui16_build_system_menu(entries,8,cells,selected);
         for (int i=0; i<CELL_COUNT; ++i) {
-            assert((cells[i]&~256)==(baseline[i]&~256)); // no stale/mutated glyphs
-            if (i/32 != UI16_MENU_FIRST_ROW+selected) assert((cells[i]&256)==0);
+            assert((cells[i]&~4096)==(baseline[i]&~4096)); // no stale/mutated glyphs
+            if (i/32 != UI16_MENU_FIRST_ROW+selected) assert((cells[i]&4096)==0);
         }
-        assert(cells[(UI16_MENU_FIRST_ROW+selected)*32+2]&256); // includes CORES/OPTIONS
+        assert(cells[(UI16_MENU_FIRST_ROW+selected)*32+2]&4096); // includes CORES/OPTIONS
         bytes.clear(); sections=0;
         ui16_send_system_menu(entries,8,selected);
         assert(bytes.size()==994 && sections==14 && critical_depth==0);
         std::size_t pos=0;
         for (int y=0; y<14; ++y) {
-            for (int b : {0xaa,0,68,14,y,0,32}) assert(bytes[pos++]==b);
+            for (int b : {0xaa,0,68,15,y,0,32}) assert(bytes[pos++]==b);
             for (int x=0; x<32; ++x) {
                 assert(bytes[pos++]==(cells[y*32+x]&255));
-                assert(bytes[pos++]==((cells[y*32+x]>>8)&3));
+                assert(bytes[pos++]==ui16_wire_high(cells[y*32+x]));
             }
         }
         char path[100], word[16];
@@ -99,9 +101,9 @@ int main()
         }
     }
     ui16_build_system_menu(entries,8,cells,999);
-    for (auto c:cells) assert((c&256)==0);
+    for (auto c:cells) assert((c&4096)==0);
     // Ownership conversion never changes other protocol commands or the payload.
-    for (int cmd=0; cmd<256; ++cmd) {
+    for (int cmd=0; cmd<4096; ++cmd) {
         assert(ui16_display_command(cmd,false)==cmd);
         assert(ui16_display_command(cmd,true)==(cmd==5 ? 13 : cmd));
     }

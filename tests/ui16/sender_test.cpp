@@ -1,3 +1,5 @@
+#include "ui16_cell.h"
+#include "ui16_font_map.h"
 #include "utils.h"
 #include <cassert>
 #include <cstdio>
@@ -20,8 +22,8 @@ int main(){
     assert(cells.size()==512);
     std::size_t pos=0;
     for(unsigned y=0;y<14;++y){
-        for(auto b:std::vector<unsigned>{0xAA,0,68,14,y,0,32})assert(bytes[pos++]==b);
-        for(unsigned x=0;x<32;++x){auto c=cells[y*32+x];assert(bytes[pos++]==(c&255));assert(bytes[pos++]==((c>>8)&3));}
+        for(auto b:std::vector<unsigned>{0xAA,0,68,15,y,0,32})assert(bytes[pos++]==b);
+        for(unsigned x=0;x<32;++x){auto c=cells[y*32+x];assert(bytes[pos++]==(c&255));assert(bytes[pos++]==ui16_wire_high(c));}
     }
     std::puts("BL616 sender host test passed: 994 bytes match FPGA selftest; 14 atomic transmit sections");
 }

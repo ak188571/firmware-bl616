@@ -1,6 +1,7 @@
 #ifdef UI16_SYSTEM_MENU
 #include "ui16_system_menu.h"
 #include "ui16_font_map.h"
+#include "ui16_cell.h"
 #include "utils.h"
 #include <string_view>
 
@@ -37,15 +38,20 @@ void text(std::uint16_t *row, const char *label, bool selected)
     while (pos < s.size()) {
         auto cp = next_utf8(s, pos);
         // The prototype font contains uppercase Latin letters only.
-        if (cp >= 'a' && cp <= 'z') cp -= 'a' - 'A';
+        // ASCII case and punctuation are preserved by the expanded font.
         const int width = cp < 0x80 ? 1 : 2;
         if (x + width > TEXT_UNITS_PER_ROW) break; // Never split a fullwidth glyph.
         std::uint16_t glyph = 0;
+        bool found = cp == 32;
         for (const auto &g : ui16_font_map)
-            if (g.codepoint == cp) { glyph = g.glyph; break; }
-        const std::uint16_t attr = selected ? 1u << (8 + ATTR_SELECTED_BIT) : 0;
+            if (g.codepoint == cp) { glyph = g.glyph; found = true; break; }
+        if (!found) {
+            const auto fallback = cp < 128 ? 0x003fu : 0x25a1u;
+            for (const auto &g : ui16_font_map) if (g.codepoint == fallback) { glyph=g.glyph; break; }
+        }
+        const std::uint16_t attr = selected ? 1u << (12 + ATTR_SELECTED_BIT) : 0;
         row[x++] = glyph | attr;
-        if (width == 2) row[x++] = glyph | attr | (1u << (8 + ATTR_HALF_BIT));
+        if (width == 2) row[x++] = glyph | attr | (1u << (12 + ATTR_HALF_BIT));
     }
 }
 
@@ -87,7 +93,7 @@ static void send_cells(const std::uint16_t (&cells)[CELL_COUNT])
         for (int x = 0; x < TEXT_UNITS_PER_ROW; ++x) {
             const auto cell = cells[y * TEXT_UNITS_PER_ROW + x];
             fpga_tx_byte(static_cast<std::uint8_t>(cell & 255));
-            fpga_tx_byte(static_cast<std::uint8_t>((cell >> 8) & ATTR_MASK));
+            fpga_tx_byte(static_cast<std::uint8_t>(ui16_wire_high(cell)));
         }
         taskEXIT_CRITICAL();
     }
@@ -108,7 +114,7 @@ void ui16_build_game_menu(const char *heading, const Ui16GameList &games, int se
     if (games.status == Ui16ListStatus::Ready) {
         for (std::size_t i = 0; i < games.names.size() && i < UI16_GAME_CAPACITY; ++i) {
             text(cells + (UI16_MENU_FIRST_ROW + i) * TEXT_UNITS_PER_ROW,
-                 games.names[i].c_str(), selected >= 0 && i == static_cast<std::size_t>(selected));
+                 (i < games.titles.size() && !games.titles[i].empty() ? games.titles[i] : games.names[i]).c_str(), selected >= 0 && i == static_cast<std::size_t>(selected));
         }
     } else {
         const char *message = games.status == Ui16ListStatus::Empty ? "NO ROM FILES" :
@@ -116,7 +122,7 @@ void ui16_build_game_menu(const char *heading, const Ui16GameList &games, int se
         text(cells + UI16_MENU_FIRST_ROW * TEXT_UNITS_PER_ROW, message, false);
     }
     text(cells + (MENU_ROWS - 1) * TEXT_UNITS_PER_ROW,
-         games.more ? "A BACK  MORE FILES" : "A BACK", false);
+         games.titles_error ? "A BACK  TSV ERROR" : games.more ? "A BACK  MORE FILES" : "A BACK", false);
 }
 
 void ui16_send_game_menu(const char *heading, const Ui16GameList &games, int selected)

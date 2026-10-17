@@ -38,6 +38,7 @@ extern "C" {
 #include "ui16_system_menu.h"
 #include "ui16_navigation.h"
 #include "ui16_browser.h"
+#include "ui16_titles.h"
 #endif
 
 // Uncomment this to enable UART console (use with caution. it may interfere with MCU-FPGA communication)
@@ -393,7 +394,9 @@ static Ui16GameList ui16_load_for_core(int core_id, void *)
         return result;
     }
     const std::string path = std::string(drv) + info->rom_dir;
-    return ui16_read_game_list(path.c_str(), core_id);
+    auto games = ui16_read_game_list(path.c_str(), core_id);
+    ui16_load_titles((path + "/titles.tsv").c_str(), games);
+    return games;
 }
 #endif
 

@@ -1,3 +1,5 @@
+#include "ui16_cell.h"
+#include "ui16_font_map.h"
 #include "ui16_browser.h"
 #include "utils.h"
 extern "C" {
@@ -50,10 +52,10 @@ static void save_frame(const char *name,const std::uint16_t (&cells)[CELL_COUNT]
     assert(bytes.size()==994 && critical_depth==0 && sections==14);
     std::size_t pos=0;
     for(int y=0;y<14;++y) {
-        for(int b:{0xaa,0,68,14,y,0,32}) assert(bytes[pos++]==b);
+        for(int b:{0xaa,0,68,15,y,0,32}) assert(bytes[pos++]==b);
         for(int x=0;x<32;++x) {
             assert(bytes[pos++]==(cells[y*32+x]&255));
-            assert(bytes[pos++]==((cells[y*32+x]>>8)&3));
+            assert(bytes[pos++]==ui16_wire_high(cells[y*32+x]));
         }
     }
     std::ofstream file(std::string("build-ui16-host/")+name+".hex");
@@ -142,9 +144,9 @@ int main() {
     games={}; games.names={"ABC.nes","DEF.NES"}; games.status=Ui16ListStatus::Ready;
     std::uint16_t cells[CELL_COUNT];
     ui16_build_game_menu("NES",games,1,cells);
-    assert(cells[3*32+2]==62 && cells[4*32+2]==(55|256));
+    assert(cells[3*32+2]==62 && cells[4*32+2]==(55|4096));
     for(int i=0;i<CELL_COUNT;++i) {
-        if(i/32!=4) assert((cells[i]&256)==0);
+        if(i/32!=4) assert((cells[i]&4096)==0);
         if(i/32>=5 && i/32<13) assert(cells[i]==0);
     }
     ui16_send_game_menu("NES",games,1); save_frame("game_list",cells);
@@ -155,7 +157,7 @@ int main() {
     for(auto status:{Ui16ListStatus::Empty,Ui16ListStatus::DirectoryError,Ui16ListStatus::ReadError}) {
         games={};games.status=status;
         ui16_build_game_menu("NES",games,-1,cells);
-        for(auto cell:cells) assert((cell&256)==0);
+        for(auto cell:cells) assert((cell&4096)==0);
         assert(cells[3*32+2]!=0 && cells[13*32+2]==62); // message plus A BACK
         ui16_send_game_menu("NES",games,-1);
         save_frame(status==Ui16ListStatus::Empty?"game_empty":status==Ui16ListStatus::DirectoryError?"game_directory_error":"game_read_error",cells);

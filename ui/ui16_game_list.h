@@ -10,6 +10,8 @@ struct Ui16GameList {
     std::vector<std::string> names;
     Ui16ListStatus status = Ui16ListStatus::Empty;
     bool more = false;
+    std::vector<std::string> titles; // Display names only; names always retains ROM filenames.
+    bool titles_error = false;
 };
 
 bool ui16_is_rom_file(int core_id, const char *name);
