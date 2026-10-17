@@ -3,7 +3,7 @@
 #include <vector>
 #include "ui16_config.h"
 
-inline constexpr int UI16_GAME_CAPACITY = MENU_ROWS - 4;
+inline constexpr int UI16_GAME_CAPACITY = 256;
 enum class Ui16ListStatus { Ready, Empty, DirectoryError, ReadError };
 
 struct Ui16GameList {

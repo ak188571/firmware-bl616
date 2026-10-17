@@ -65,6 +65,7 @@ static void save_frame(const char *name,const std::uint16_t (&cells)[CELL_COUNT]
 }
 
 int main() {
+    unsigned gid_x=0;for(auto e:ui16_font_map)if(e.codepoint=='X')gid_x=e.glyph;
     const struct { int id; const char *name; } good[] = {
         {1,"ABC.NES"},{2,"ABC.sfc"},{2,"ABC.SMC"},{3,"ABC.gba"},
         {4,"ABC.bin"},{4,"ABC.MD"},{5,"ABC.sms"},{6,"ABC.img"}
@@ -83,12 +84,12 @@ int main() {
     assert(games.status==Ui16ListStatus::Ready && games.names.size()==4 && !games.more);
     assert(games.names[0]=="ABC.nes" && games.names[1]=="DEF.NES" && games.names[3]==long_name);
     assert(opened_path=="sd:nes" && opens==1 && closes==1);
-    reset_fs(); for(int i=0;i<10;++i) directory.push_back({"ABC.nes"});
+    reset_fs(); for(int i=0;i<UI16_GAME_CAPACITY;++i) directory.push_back({"ABC.nes"});
     games=ui16_read_game_list("sd:nes",1);
-    assert(games.names.size()==10 && !games.more);
+    assert(games.names.size()==UI16_GAME_CAPACITY && !games.more);
     directory.push_back({"DEF.nes"});
     games=ui16_read_game_list("usb:nes",1);
-    assert(games.names.size()==10 && games.more && opened_path=="usb:nes");
+    assert(games.names.size()==UI16_GAME_CAPACITY && games.more && opened_path=="usb:nes");
     reset_fs(); games=ui16_read_game_list("sd:nes",1);
     assert(games.status==Ui16ListStatus::Empty && games.names.empty() && closes==1);
     reset_fs(); open_error=true; games=ui16_read_game_list("sd:missing",1);
@@ -152,13 +153,13 @@ int main() {
     ui16_send_game_menu("NES",games,1); save_frame("game_list",cells);
     games.more=true;
     ui16_build_game_menu("SNES",games,0,cells);
-    assert(cells[13*32+10]!=0); // MORE FILES hint
+    assert(cells[13*32+12]!=0); // MORE FILES hint
     ui16_send_game_menu("SNES",games,0); save_frame("game_more",cells);
     for(auto status:{Ui16ListStatus::Empty,Ui16ListStatus::DirectoryError,Ui16ListStatus::ReadError}) {
         games={};games.status=status;
         ui16_build_game_menu("NES",games,-1,cells);
         for(auto cell:cells) assert((cell&4096)==0);
-        assert(cells[3*32+2]!=0 && cells[13*32+2]==62); // message plus A BACK
+        assert(cells[3*32+2]!=0 && cells[13*32+2]==gid_x); // message plus A BACK
         ui16_send_game_menu("NES",games,-1);
         save_frame(status==Ui16ListStatus::Empty?"game_empty":status==Ui16ListStatus::DirectoryError?"game_directory_error":"game_read_error",cells);
     }

@@ -36,7 +36,7 @@ def main():
                 key=f.name.lower()
                 if key in entries:report('ERROR',f'Ambiguous case-insensitive name: {f}')
                 entries[key]=f
-        if len(entries)>10:report('WARN',f'{directory}: {len(entries)} entries; device currently displays only the first 10')
+        if len(entries)>256:report('WARN',f'{directory}: {len(entries)} entries; device list limit is 256 (split into subfolders)')
         if not path.is_file() and (directory/'titles.tsv').exists():report('ERROR',f'{directory}: migrate legacy titles.tsv to titles.csv (name<TAB>title)')
         try:rows=read_titles(path) if path.is_file() else []
         except ValueError as e:report('ERROR',str(e));continue

@@ -321,4 +321,5 @@ inline constexpr Ui16FontEntry ui16_font_map[] = {
     {0x7248, 315},
     {0x9059, 316},
     {0x967A, 317},
+    {0x623B, 318},
 };

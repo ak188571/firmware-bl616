@@ -53,7 +53,10 @@ class FolderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)
             for i in range(11):(root/f'{i}.nes').write_bytes(b'')
-            result=run('check_titles.py',root,'--core','nes');self.assertEqual(result.returncode,0);self.assertIn('first 10',result.stdout)
+            result=run('check_titles.py',root,'--core','nes');self.assertEqual(result.returncode,0);self.assertNotIn('first 10',result.stdout)
+            self.assertNotIn('device list limit',result.stdout)
+            for i in range(11,257):(root/f'{i}.nes').write_bytes(b'')
+            result=run('check_titles.py',root,'--core','nes');self.assertEqual(result.returncode,0);self.assertIn('device list limit is 256',result.stdout)
             folder=root
             for _ in range(17):folder=folder/'d';folder.mkdir()
             with self.assertRaises(ValueError):list(walk_directories(root))

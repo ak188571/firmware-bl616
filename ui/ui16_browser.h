@@ -2,8 +2,8 @@
 #include "ui16_navigation.h"
 #include "ui16_game_list.h"
 
-inline constexpr std::uint16_t UI16_BUTTON_CONFIRM = 0x0001; // B
-inline constexpr std::uint16_t UI16_BUTTON_BACK = 0x0100;    // A
+inline constexpr std::uint16_t UI16_BUTTON_CONFIRM = 0x0101; // A or B
+inline constexpr std::uint16_t UI16_BUTTON_BACK = 0x0202;    // X or Y
 inline constexpr std::size_t UI16_MAX_FOLDER_DEPTH = 16;
 inline constexpr std::size_t UI16_MAX_RELATIVE_PATH = 511;
 using Ui16GameLoader = Ui16GameList (*)(int core_id, const char *relative_path, void *context);
@@ -17,6 +17,8 @@ public:
     bool in_games() const { return in_games_; }
     int selected_system() const { return systems_.selected(); }
     int selected_file() const { return files_.selected(); }
+    int system_top() const { return system_top_; }
+    int file_top() const { return file_top_; }
     const Ui16MenuEntry *active_system() const;
     const Ui16GameList &game_list() const { return games_; }
     const std::string &relative_path() const { return relative_path_; }
@@ -30,7 +32,9 @@ private:
     Ui16GameList games_;
     std::uint16_t previous_buttons_ = 0;
     bool in_games_ = false;
-    struct Location { std::string component; std::string heading; int selected; };
+    int system_top_ = 0;
+    int file_top_ = 0;
+    struct Location { std::string component; std::string heading; int selected; int top; };
     std::vector<Location> levels_;
     std::string relative_path_;
     void load(Ui16GameLoader loader, void *context, int selected = 0);

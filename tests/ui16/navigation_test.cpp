@@ -57,7 +57,7 @@ int main()
     Ui16Navigation empty(0), single(1), cap(999,999), negative(8,-10);
     assert(empty.selected() == -1 && !empty.update(down, 0) && !empty.update(up, 1));
     assert(single.selected() == 0 && !single.update(up, 0) && !single.update(down, 1));
-    assert(cap.selected() == UI16_MENU_CAPACITY-1 && negative.selected() == 0);
+    assert(cap.selected() == 998 && negative.selected() == 0);
     Ui16Navigation wrapped(8);
     const std::uint32_t start = 0xffffff00;
     assert(wrapped.update(down,start));

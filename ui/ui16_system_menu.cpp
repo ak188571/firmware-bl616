@@ -4,6 +4,8 @@
 #include "ui16_cell.h"
 #include "utils.h"
 #include <string_view>
+#include <algorithm>
+#include <limits>
 
 namespace {
 // Same UTF-8 validation and cell widths as the PC simulator.
@@ -66,14 +68,30 @@ const char *ui16_system_label(const Ui16MenuEntry &entry)
     }
 }
 
+int ui16_scroll_top(int selected, std::size_t count, int top)
+{
+    const int n=static_cast<int>(std::min<std::size_t>(count,std::numeric_limits<int>::max()));
+    const int max_top=std::max(0,n-UI16_MENU_CAPACITY);
+    top=std::max(0,std::min(top,max_top));
+    if(selected>=0 && selected<n) {
+        if(selected<top)top=selected;
+        else if(selected>=top+UI16_MENU_CAPACITY)top=selected-UI16_MENU_CAPACITY+1;
+    }
+    return std::min(top,max_top);
+}
+
 void ui16_build_system_menu(const Ui16MenuEntry *entries, std::size_t count,
-                           std::uint16_t (&cells)[CELL_COUNT], int selected_index)
+                           std::uint16_t (&cells)[CELL_COUNT], int selected_index, int top)
 {
     for (auto &cell : cells) cell = 0;
     text(cells + TEXT_UNITS_PER_ROW, "SYSTEMS", false);
+    std::size_t actual=0;
+    while(entries && actual<count && entries[actual].id!=0)++actual;
+    if(top<0)top=ui16_scroll_top(selected_index,actual,0);
+    else top=ui16_scroll_top(-1,actual,top);
     bool selected = false;
     int row = UI16_MENU_FIRST_ROW;
-    for (std::size_t i = 0; entries && i < count && row < MENU_ROWS - 1; ++i) {
+    for (std::size_t i = static_cast<std::size_t>(top); entries && i < actual && row < MENU_ROWS - 1; ++i) {
         if (entries[i].id == 0) break;
         const bool select = selected_index == -1 ? entries[i].id > 0 && !selected :
                             selected_index >= 0 && i == static_cast<std::size_t>(selected_index);
@@ -99,23 +117,24 @@ static void send_cells(const std::uint16_t (&cells)[CELL_COUNT])
     }
 }
 
-void ui16_send_system_menu(const Ui16MenuEntry *entries, std::size_t count, int selected_index)
+void ui16_send_system_menu(const Ui16MenuEntry *entries, std::size_t count, int selected_index, int top)
 {
     std::uint16_t cells[CELL_COUNT];
-    ui16_build_system_menu(entries, count, cells, selected_index);
+    ui16_build_system_menu(entries, count, cells, selected_index, top);
     send_cells(cells);
 }
 
 void ui16_build_game_menu(const char *heading, const Ui16GameList &games, int selected,
-                         std::uint16_t (&cells)[CELL_COUNT])
+                         std::uint16_t (&cells)[CELL_COUNT], int top)
 {
     for (auto &cell : cells) cell = 0;
     text(cells + TEXT_UNITS_PER_ROW, heading, false);
+    top=ui16_scroll_top(top<0?selected:-1,games.names.size(),std::max(0,top));
     if (games.status == Ui16ListStatus::Ready) {
-        for (std::size_t i = 0; i < games.names.size() && i < UI16_GAME_CAPACITY; ++i) {
+        for (std::size_t i = static_cast<std::size_t>(top); i < games.names.size() && i < static_cast<std::size_t>(top+UI16_MENU_CAPACITY); ++i) {
             std::string display=i < games.titles.size() && !games.titles[i].empty() ? games.titles[i] : games.names[i];
             if(i<games.directories.size() && games.directories[i])display+="/";
-            text(cells + (UI16_MENU_FIRST_ROW + i) * TEXT_UNITS_PER_ROW,
+            text(cells + (UI16_MENU_FIRST_ROW + i - top) * TEXT_UNITS_PER_ROW,
                  display.c_str(), selected >= 0 && i == static_cast<std::size_t>(selected));
         }
     } else {
@@ -124,13 +143,13 @@ void ui16_build_game_menu(const char *heading, const Ui16GameList &games, int se
         text(cells + UI16_MENU_FIRST_ROW * TEXT_UNITS_PER_ROW, message, false);
     }
     text(cells + (MENU_ROWS - 1) * TEXT_UNITS_PER_ROW,
-         games.navigation_error ? "A BACK  NAV ERROR" : games.titles_error ? "A BACK  CSV ERROR" : games.more ? "A BACK  MORE ITEMS" : "A BACK", false);
+         games.navigation_error ? u8"X/Y 戻る NAV ERROR" : games.titles_error ? u8"X/Y 戻る CSV ERROR" : games.more ? u8"X/Y 戻る LIST LIMIT" : u8"X/Y 戻る", false);
 }
 
-void ui16_send_game_menu(const char *heading, const Ui16GameList &games, int selected)
+void ui16_send_game_menu(const char *heading, const Ui16GameList &games, int selected, int top)
 {
     std::uint16_t cells[CELL_COUNT];
-    ui16_build_game_menu(heading, games, selected, cells);
+    ui16_build_game_menu(heading, games, selected, cells, top);
     send_cells(cells);
 }
 #endif

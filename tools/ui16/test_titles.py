@@ -33,7 +33,12 @@ class TitlesTests(unittest.TestCase):
             sv=''.join(f'`define UI_{key} {value}\n' for key,value in re.findall(r'inline constexpr int (\w+) = (\d+);',config))
             (mon/'src/iosys/ui16/ui_config.svh').write_text(sv)
             roms=root/'nes';nested=roms/'action';nested.mkdir(parents=True)
-            tsv=nested/'titles.csv';tsv.write_text('name\ttitle\na.nes\t冒険\n',encoding='utf-8')
+            tsv=nested/'titles.csv'
+            import gzip
+            bank=json.loads(gzip.decompress((Path(__file__).with_name('shinonome16.json.gz')).read_bytes()))
+            known={e['cp'] for e in json.loads((fw/'ui/ui16_font_manifest.json').read_text())['glyphs']}
+            extra=next(chr(int(cp)) for cp in sorted(bank,key=int) if int(cp)>=0x4e00 and int(cp) not in known)
+            tsv.write_text('name\ttitle\na.nes\t'+extra+'\n',encoding='utf-8')
             original=json.loads((fw/'ui/ui16_font_manifest.json').read_text());old_root=build_font.ROOT;old_argv=sys.argv
             try:
                 build_font.ROOT=fw

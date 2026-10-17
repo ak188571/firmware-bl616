@@ -442,36 +442,38 @@ static void main_task(void *pvParameters)
             for (;;) delay(1000);
         }
         // Keep the configured order; include existing Cores/Options entries.
-        Ui16MenuEntry entries[UI16_MENU_CAPACITY];
+        std::vector<Ui16MenuEntry> entries;
+        entries.reserve(main_menu_config.size());
         std::size_t count = 0;
         for (const auto id : main_menu_config) {
-            if (id == 0 || count == UI16_MENU_CAPACITY) break;
+            if (id == 0) break;
             if (id > 0) {
                 const auto *info = find_core_by_id(id);
-                if (info) entries[count++] = {id, info->display_name};
+                if (info) entries.push_back({id, info->display_name});
             } else if (id == -1) {
-                entries[count++] = {id, "CORES"};
+                entries.push_back({id, "CORES"});
             } else if (id == -2) {
-                entries[count++] = {id, "OPTIONS"};
+                entries.push_back({id, "OPTIONS"});
             }
         }
         delay(1000);
+        count=entries.size();
         int initial = 0;
         for (std::size_t i = 0; i < count; ++i) {
             if (entries[i].id > 0) { initial = static_cast<int>(i); break; }
         }
-        Ui16Browser browser(entries, count, initial);
+        Ui16Browser browser(entries.data(), count, initial);
         fpga_use_ui16_display(true);
         const auto redraw = [&]() {
             if (browser.in_games()) {
                 ui16_send_game_menu(browser.heading(),
-                                    browser.game_list(), browser.selected_file());
+                                    browser.game_list(), browser.selected_file(), browser.file_top());
             } else {
-                ui16_send_system_menu(entries, count, browser.selected_system());
+                ui16_send_system_menu(entries.data(), count, browser.selected_system(), browser.system_top());
             }
         };
         redraw();
-        // B enters a system/folder; A returns one level. ROM loading is not connected.
+        // A/B enter a system/folder; X/Y return one level. ROM loading is not connected.
         for (;;) {
             uint16_t joy1 = 0, joy2 = 0, hid1 = 0, hid2 = 0;
             get_joypad_states(&joy1, &joy2, &hid1, &hid2);

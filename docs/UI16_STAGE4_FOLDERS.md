@@ -160,3 +160,9 @@ bash tools/ui16/test_sender.sh
 
 実機確認後、ZIPのCHANGED_FILES.txtのファイルをfirmware-bl616でcommit/pushし、親tangcoreの参照を更新する。
 build/obj_dir/__pycache__、適用patch/scriptは追加しない。microSD上の実データは別途バックアップする。
+
+## 第5段階適用後
+
+操作・件数・スクロール・更新手順はUI16_STAGE5.mdを参照。
+第5段階ではA/Bで決定、X/Yで戻る。各階層256項目まで読込み、10行の表示範囲を縦スクロールする。
+第4段階の「先頭10項目」「Aで戻る」「今回FPGA更新不要」は第4段階単独の説明。第5段階の案内文字追加にはFPGA更新も必要。

@@ -1,8 +1,9 @@
 #ifdef UI16_SYSTEM_MENU
 #include "ui16_navigation.h"
+#include <limits>
 
 Ui16Navigation::Ui16Navigation(std::size_t count, int initial)
-    : count_(static_cast<int>(count > UI16_MENU_CAPACITY ? UI16_MENU_CAPACITY : count)),
+    : count_(static_cast<int>(count > static_cast<std::size_t>(std::numeric_limits<int>::max()) ? std::numeric_limits<int>::max() : count)),
       selected_(count_ == 0 ? -1 : initial < 0 ? 0 : initial >= count_ ? count_ - 1 : initial)
 {
 }

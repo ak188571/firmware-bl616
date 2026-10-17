@@ -27,7 +27,7 @@ def main():
         entries = [{'cp':int(cp,16),'id':int(gid),'rows':words[int(gid)*16:(int(gid)+1)*16]} for cp,gid in mapping]
         entries.insert(0, {'cp':32,'id':0,'rows':[0]*16})
     seen = {e['cp'] for e in entries}
-    required = set(range(32,127)) | {0x25a1}
+    required = set(range(32,127)) | {0x25a1} | set(map(ord,"X/Y 戻る"))
     required |= {int(cp) for cp in bank if 0x3000 <= int(cp) <= 0x30ff}
     # Validate strict tab-separated CSV before generating any output.
     from titles_common import read_titles,csv_paths
