@@ -41,6 +41,12 @@ extern "C" {
 #include "ui16_titles.h"
 #include "ui16_launch.h"
 #include "ui16_osd_menu.h"
+#ifdef UI16_SD_FONT
+#include "ui16_font_cache.h"
+#ifdef UI16_RELIABLE_FONT
+#include "ui16_link.h"
+#endif
+#endif
 #endif
 
 // Uncomment this to enable UART console (use with caution. it may interfere with MCU-FPGA communication)
@@ -339,6 +345,9 @@ static void uart1_rx_start()
 static void uart1_rx_task(void *pvParameters)
 {
     uint8_t buffer[5];
+#ifdef UI16_RELIABLE_FONT
+    uint8_t link_ack[14];
+#endif
     uint16_t pos = 0;
     uint8_t type = 0;
     uint16_t len = 0;
@@ -366,9 +375,20 @@ static void uart1_rx_task(void *pvParameters)
             } else if (pos == 3) {   // command type
                 type = ch;
                 pos++;
+#ifdef UI16_RELIABLE_FONT
+                if(type==0x16 && len!=15)pos=0;
+#endif
 
             ////// pos >= 4 //////
-            } else if (type == 1) {     // response to command 1 (get core ID)
+            }
+#ifdef UI16_RELIABLE_FONT
+            else if(type==0x16) {
+                link_ack[pos-4]=ch;
+                if(pos==17){ui16_link_accept_ack(link_ack,sizeof link_ack);pos=0;}
+                else ++pos;
+            }
+#endif
+            else if (type == 1) {     // response to command 1 (get core ID)
                 if (xSemaphoreTake(state_mutex, portMAX_DELAY) == pdTRUE) {
                     core_id = ch;
                     xSemaphoreGive(state_mutex);
@@ -506,6 +526,14 @@ static void ui16_hw_display_owner(bool ui16,void *)
 {
     fpga_use_ui16_display(ui16);overlay(1);
 }
+static bool ui16_hw_starting(void *)
+{
+    ui16_send_starting_game();
+    if (bflb_uart_wait_tx_done(uart1_dev)!=0) return false;
+    // Allow the completed frame to remain visible before FPGA reconfiguration.
+    delay(500);
+    return true;
+}
 // UI16 launch adapters END
 
 static std::uint16_t ui16_buttons()
@@ -587,6 +615,12 @@ static void main_task(void *pvParameters)
             overlay_status("UI16: monitor load failed");
             for (;;) delay(1000);
         }
+#ifdef UI16_SD_FONT
+        // Main UI16 is independent of game OSD; if the pack is absent or corrupt
+        // the fixed 319-glyph font remains available.
+        const auto font_file = std::string(drv) + "/ui16/font16.ui16";
+        ui16_font_open(font_file.c_str());
+#endif
         // Keep the configured order; include existing Cores/Options entries.
         std::vector<Ui16MenuEntry> entries;
         entries.reserve(main_menu_config.size());
@@ -610,7 +644,7 @@ static void main_task(void *pvParameters)
         }
         Ui16Browser browser(entries.data(), count, initial);
         Ui16Runtime runtime({nullptr,ui16_hw_file_ready,ui16_hw_find_core,ui16_hw_program,
-            ui16_hw_wait_core,ui16_hw_load_rom,ui16_hw_display_owner,ui16_hw_osd_ready});
+            ui16_hw_wait_core,ui16_hw_load_rom,ui16_hw_display_owner,ui16_hw_osd_ready,ui16_hw_starting});
         fpga_use_ui16_display(true);
         const auto redraw = [&]() {
             if (browser.in_games()) {
@@ -654,6 +688,11 @@ static void main_task(void *pvParameters)
                     menu_clear();
                 }
                 ui16_restore_menu(runtime,browser);
+#ifdef UI16_SD_FONT
+                // FPGA reprogramming restores the initial embedded font ROM.
+                // Never trust a cached dynamic slot after returning from a game.
+                ui16_font_monitor_reset();
+#endif
                 browser.set_launch_error(error==Ui16LaunchError::None?nullptr:ui16_launch_error_text(error));
                 redraw();
             }
@@ -814,6 +853,10 @@ static void print_system_info(void) {
 }
 
 // Initialize things, then start main_task and uart1_rx_task to do actual work
+#ifdef UI16_RELIABLE_FONT
+static std::uint32_t ui16_link_now_ms() { return static_cast<std::uint32_t>(bflb_mtimer_get_time_ms()); }
+static void ui16_link_wait_ms() { vTaskDelay(1); }
+#endif
 int main(void)
 {
     /* Board init */
@@ -839,6 +882,9 @@ int main(void)
     usb_gamepad_init();
 
     overlay_status("Creating tasks...");
+#ifdef UI16_RELIABLE_FONT
+    ui16_link_set_platform(ui16_link_now_ms,ui16_link_wait_ms);
+#endif
     // Create the tasks
     xTaskCreate(main_task, "main_task", MAIN_TASK_STACK_SIZE, NULL, MAIN_TASK_PRIORITY, &main_task_handle);
     xTaskCreate(uart1_rx_task, "uart1_rx_task", UART1_RX_TASK_STACK_SIZE, NULL, UART1_RX_TASK_PRIORITY, &uart1_rx_task_handle);

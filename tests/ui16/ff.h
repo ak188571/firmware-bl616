@@ -5,7 +5,10 @@ typedef int FRESULT;
 enum { FR_OK = 0, FR_DISK_ERR = 1, FR_NO_PATH = 5 };
 enum { FR_NO_FILE = 4, FA_READ = 1 };
 typedef unsigned int UINT;
-typedef struct { size_t position; } FIL;
+typedef struct { size_t position; size_t size; } FIL;
+typedef size_t FSIZE_t;
+#define f_size(fp) ((fp)->size)
+FRESULT f_lseek(FIL *file, FSIZE_t position);
 FRESULT f_open(FIL *file, const char *path, unsigned char mode);
 FRESULT f_read(FIL *file, void *buffer, UINT length, UINT *read);
 FRESULT f_close(FIL *file);
