@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <cstdint>
 #include <vector>
 #include "overlay.h"
 
@@ -13,6 +14,7 @@ struct Menu {
     }
     virtual ~Menu() = default;
     virtual bool on_adjust(int,int) {return false;}
+    virtual bool on_tick(std::uint32_t) {return false;}
     virtual int osd_width() const {return 0;}
     virtual bool fullscreen_dialog(int) const {return false;}
     virtual void render() = 0;

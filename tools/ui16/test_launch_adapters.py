@@ -13,6 +13,9 @@ code=r'''
 #include <vector>
 #include <cassert>
 #include <cstdio>
+#include "ui16_crt.h"
+static bool crt_stage1_capable=false;
+static Ui16GameOsd game_osd_owner=Ui16GameOsd::System;
 using std::uint16_t;using std::uint64_t;
 struct FILINFO {unsigned char fattrib=0;unsigned fsize=100;};
 constexpr int FR_OK=0,AM_DIR=16;
@@ -41,11 +44,14 @@ core_info target{rom};
 core_info *find_core_by_id(int n){return n==1?&target:nullptr;}
 void overlay(int n){_overlay_on=n;}
 void overlay_osd_window(unsigned,unsigned,unsigned,unsigned){}
+void overlay_osd_neutral();
 int overlay_on(){return _overlay_on;}
 void fpga_use_ui16_display(bool n){owner=n;}
 void dprint(const char *,...){}
 struct Pad {uint16_t j1=0,j2=0,h1=0,h2=0;};
 static std::vector<Pad> pads;static unsigned index=0;
+static unsigned neutral_calls=0;
+void overlay_osd_neutral(){++neutral_calls;++index;}
 void get_joypad_states(uint16_t *j1,uint16_t *j2,uint16_t *h1,uint16_t *h2){assert(index<pads.size());const auto p=pads[index];*j1=p.j1;*j2=p.j2;*h1=p.h1;*h2=p.h2;}
 void vTaskDelay(unsigned){++index;}
 #define pdMS_TO_TICKS(n) (n)
@@ -78,6 +84,14 @@ int main(){
  index=0;bytes.clear();overlay(0);pads={{4,128,0,0},{0x84,0,0,0}};send_hid_to_core();assert(index==1&&bytes.size()==4);
  // Software/keyboard overlay-on also exits gameplay input forwarding.
  index=0;bytes.clear();pads={{}};overlay(1);send_hid_to_core();assert(index==0);
+ // The real forwarding loop recognizes OSD2 only on a capable core and P1.
+ crt_stage1_capable=true;index=0;bytes.clear();overlay(0);
+ pads={{0,0x84,0,0},{0,0,1,0},{0,0,0x144,0}};send_hid_to_core();
+ assert(index==2&&bytes.size()==8&&game_osd_owner==Ui16GameOsd::Crt);
+ index=0;bytes.clear();overlay(0);pads={{0x184,0,0,0}};send_hid_to_core();
+ assert(bytes.empty()&&game_osd_owner==Ui16GameOsd::System);
+ index=0;bytes.clear();overlay(0);pads={{0xc4,0,0,0},{0,0,0,0},{0x44,0,0,0}};
+ send_hid_to_core();assert(index==2&&neutral_calls==1&&bytes.size()==4&&game_osd_owner==Ui16GameOsd::Crt);
  std::puts("Actual main.cpp adapters passed: stat/program/ID timeout/load state, display ownership, unmodified X/Y game HID, OSD chord, neutral packets");
 }
 '''
@@ -87,7 +101,7 @@ if os.name=='nt':
     converted=subprocess.check_output(['cygpath','-m','/ucrt64/bin'],text=True,encoding='utf-8').strip()
     extra=['-B'+converted+'/']
 exe=build/('launch_adapters_test.exe' if os.name=='nt' else 'launch_adapters_test')
-subprocess.run(['g++',*extra,'-DUI16_SYSTEM_MENU','-std=c++17','-Wall','-Wextra','-Werror','-pedantic',str(path),'-o',str(exe)],check=True)
+subprocess.run(['g++',*extra,'-DUI16_SYSTEM_MENU','-std=c++17','-Wall','-Wextra','-Werror','-pedantic','-I'+str(ROOT/'ui'),str(path),'-o',str(exe)],check=True)
 subprocess.run([str(exe)],check=True)
 
 
@@ -139,6 +153,8 @@ syntax=r'''
 #include "ui16_browser.h"
 #include "ui16_launch.h"
 #include "menu_manager.h"
+#include "ui16_osd_menu.h"
+#include "ui16_crt.h"
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -157,7 +173,8 @@ void fpga_use_ui16_display(bool);
 bool ui16_hw_osd_ready(void *);
 bool ui16_hw_starting(void *);
 void overlay_osd_window(unsigned,unsigned,unsigned,unsigned);
-void ui16_osd_menu_input_loop();
+extern bool crt_stage1_capable;
+extern Ui16GameOsd game_osd_owner;
 void delay(unsigned);
 void get_joypad_states(uint16_t *,uint16_t *,uint16_t *,uint16_t *);
 unsigned long long bflb_mtimer_get_time_ms();

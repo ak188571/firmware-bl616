@@ -1,6 +1,7 @@
 #ifdef UI16_SYSTEM_MENU
 #include "ui16_osd_menu.h"
 #include "ui16_osd.h"
+#include "ui16_crt.h"
 #include "ui16_navigation.h"
 #include "ui16_browser.h"
 #include "menu_manager.h"
@@ -8,7 +9,7 @@
 #include <algorithm>
 
 namespace { Ui16OsdPosition position=Ui16OsdPosition::TopRight; }
-void ui16_osd_menu_input_loop()
+void ui16_osd_menu_input_loop(bool fixed_center,const char *title,bool dual_osd)
 {
     if(!menu_is_active())return;
     Menu *shown=nullptr;
@@ -20,17 +21,18 @@ void ui16_osd_menu_input_loop()
     while(menu_is_active()&&overlay_on()){
         auto *menu=menu_current();
         if(shown!=menu){
-            shown=menu;options=menu->get_options();nav=Ui16Navigation(options.size()+1);
+            shown=menu;options=menu->get_options();nav=Ui16Navigation(options.size()+(fixed_center?0:1));
             top=0;width_floor=menu->osd_width();dirty=true;
         }
+        if(menu->on_tick(static_cast<std::uint32_t>(bflb_mtimer_get_time_ms())))dirty=true;
         if(dirty||menu->redraw){
             const auto updated=menu->get_options();
             if(updated!=options){
                 const int selected=nav.selected();options=updated;
-                nav=Ui16Navigation(options.size()+1,selected);
+                nav=Ui16Navigation(options.size()+(fixed_center?0:1),selected);
             }
             overlay_osd_capture_begin();menu->render();overlay_osd_capture_end();
-            const auto frame=ui16_osd_layout(ui16_osd_canvas(),options,nav.selected(),top,width_floor,position);
+            const auto frame=ui16_osd_layout(ui16_osd_canvas(),options,nav.selected(),top,width_floor,fixed_center?Ui16OsdPosition::Center:position,!fixed_center,title);
             // Hide old geometry while replacing character cells; input remains blocked.
             overlay_osd_window(0,0,0,0);
             overlay_clear();
@@ -43,17 +45,20 @@ void ui16_osd_menu_input_loop()
         }
         std::uint16_t j1=0,j2=0,h1=0,h2=0;
         get_joypad_states(&j1,&j2,&h1,&h2);
-        const auto buttons=static_cast<std::uint16_t>(j1|j2|h1|h2);
+        const auto buttons=static_cast<std::uint16_t>(dual_osd?(j1|h1):(j1|j2|h1|h2));
+        // Other OSD chords are ignored while a popup owns input. Wait for all
+        // buttons to release so their directions cannot adjust the current OSD.
+        if(dual_osd && (ui16_osd_reserved(j1)||ui16_osd_reserved(h1))){previous=buttons;delay(10);continue;}
         const auto pressed=static_cast<std::uint16_t>(buttons&~previous);previous=buttons;
         const bool conflict=(buttons&UI16_BUTTON_CONFIRM)&&(buttons&UI16_BUTTON_BACK);
-        if((j1==OSD_KEY_CODE||j2==OSD_KEY_CODE||h1==OSD_KEY_CODE||h2==OSD_KEY_CODE)&&pressed){overlay(0);return;}
+        if(!dual_osd&&(j1==OSD_KEY_CODE||j2==OSD_KEY_CODE||h1==OSD_KEY_CODE||h2==OSD_KEY_CODE)&&pressed){overlay(0);return;}
         if(!conflict&&(pressed&UI16_BUTTON_BACK)){overlay(0);return;}
         const auto now=static_cast<std::uint32_t>(bflb_mtimer_get_time_ms());
         if(nav.update(buttons,now))dirty=true;
         const bool left=(pressed&0x40)!=0,right=(pressed&0x80)!=0;
         if(left!=right){
             const int delta=right?1:-1;
-            if(nav.selected()==static_cast<int>(options.size())){
+            if(!fixed_center && nav.selected()==static_cast<int>(options.size())){
                 position=static_cast<Ui16OsdPosition>((static_cast<int>(position)+delta+5)%5);dirty=true;
             }else if(menu->on_adjust(nav.selected(),delta))dirty=true;
         }
