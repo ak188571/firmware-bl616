@@ -13,7 +13,8 @@ struct Ui16MenuEntry {
 const char *ui16_system_label(const Ui16MenuEntry &entry);
 
 inline constexpr int UI16_MENU_FIRST_ROW = 3;
-inline constexpr int UI16_MENU_CAPACITY = MENU_ROWS - UI16_MENU_FIRST_ROW - 1;
+inline constexpr int UI16_MENU_END_ROW = MENU_ROWS - 3; // exclusive; leave 8 px before the footer
+inline constexpr int UI16_MENU_CAPACITY = UI16_MENU_END_ROW - UI16_MENU_FIRST_ROW;
 
 // Keep selection visible without paging; top is an item index.
 int ui16_scroll_top(int selected, std::size_t count, int top);
@@ -30,3 +31,5 @@ void ui16_send_system_menu(const Ui16MenuEntry *entries, std::size_t count,
 void ui16_build_game_menu(const char *heading, const Ui16GameList &games, int selected,
                          std::uint16_t (&cells)[CELL_COUNT], int top = -1);
 void ui16_send_game_menu(const char *heading, const Ui16GameList &games, int selected, int top = -1);
+void ui16_build_starting_game(std::uint16_t (&cells)[CELL_COUNT]);
+void ui16_send_starting_game();

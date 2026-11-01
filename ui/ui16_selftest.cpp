@@ -14,7 +14,8 @@ void ui16_send_selftest()
         fpga_tx_byte(0);
         fpga_tx_byte(TEXT_UNITS_PER_ROW);
         for (int x=0;x<TEXT_UNITS_PER_ROW;++x) {
-            auto cell=ui16_selftest_cells[y*TEXT_UNITS_PER_ROW+x];
+            auto cell=ui16_selftest_cells[(y/GLYPH_VERTICAL_UNITS)*TEXT_UNITS_PER_ROW+x];
+            if (y % GLYPH_VERTICAL_UNITS) cell |= UI16_VERTICAL_HALF;
             fpga_tx_byte(static_cast<uint8_t>(cell&255));
             fpga_tx_byte(static_cast<uint8_t>(ui16_wire_high(cell)));
         }
