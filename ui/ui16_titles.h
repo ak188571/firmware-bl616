@@ -15,6 +15,8 @@ private:
     Ui16GameList &games_;
     std::vector<std::string> pending_;
     std::vector<bool> seen_;
+    std::vector<std::size_t> order_;
+    std::vector<std::string> csv_names_;
     std::string line_;
     std::size_t total_ = 0;
     bool first_ = true;

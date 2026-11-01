@@ -41,26 +41,23 @@ static Ui16GameList load(int,const char *path,void *){
 static void verify(const Ui16Browser &b){
     const auto &g=b.game_list();std::uint16_t cells[CELL_COUNT];
     ui16_build_game_menu("NES",g,b.selected_file(),cells,b.file_top());
-    int row=3,selected_rows=0;
-    for(std::size_t i=b.file_top();i<g.names.size();++i){
-        const auto label=ui16_game_label(g,i);const auto layout=ui16_layout_text(label);
-        if(row+layout.count>13)break;
-        for(int line=0;line<layout.count;++line){
-            const int y=row+line;
-            assert(bool(cells[y*32+2]&4096)==(static_cast<int>(i)==b.selected_file()));
-            if(line)assert((cells[y*32+2]&4095)==0); // indentation is a blank glyph
-            if(static_cast<int>(i)==b.selected_file())++selected_rows;
-        }
-        row+=layout.count;
-    }
-    assert(selected_rows==ui16_layout_text(ui16_game_label(g,b.selected_file())).count);
-    for(int y=row;y<13;++y)for(int x=0;x<32;++x)assert(cells[y*32+x]==0);
-    assert(cells[13*32+2]==glyph('X'));
-    wire.clear();ui16_send_game_menu("NES",g,b.selected_file(),b.file_top());assert(wire.size()==994);
-    for(int y=0;y<14;++y)for(int x=0;x<32;++x){const auto offset=y*71+7+x*2;assert(wire[offset]==(cells[y*32+x]&255));assert(wire[offset+1]==ui16_wire_high(cells[y*32+x]));}
+    const auto layout=ui16_layout_text(ui16_game_label(g,b.selected_file()));
+    const int top=(MENU_ROWS-layout.count*GLYPH_VERTICAL_UNITS)/2;int selected_rows=0;
+    if(b.selected_file()==0)
+        for(int y=UI16_MENU_FIRST_ROW;y<top;++y)
+            for(int x=0;x<32;++x)assert(cells[y*32+x]==0);
+    if(static_cast<std::size_t>(b.selected_file()+1)==g.names.size())
+        for(int y=top+layout.count*GLYPH_VERTICAL_UNITS;y<UI16_MENU_END_ROW;++y)
+            for(int x=0;x<32;++x)assert(cells[y*32+x]==0);
+    for(int y=0;y<MENU_ROWS;++y){bool selected=false;for(int x=0;x<32;++x)selected|=(cells[y*32+x]&UI16_SELECTED)!=0;
+        if(selected){++selected_rows;assert(y>=top&&y<top+layout.count*GLYPH_VERTICAL_UNITS);}}
+    assert(selected_rows==layout.count*GLYPH_VERTICAL_UNITS);
+    assert(cells[26*32+2]==glyph('X'));
+    wire.clear();ui16_send_game_menu("NES",g,b.selected_file(),b.file_top());assert(wire.size()==1988);
+    for(int y=0;y<MENU_ROWS;++y)for(int x=0;x<32;++x){const auto offset=y*71+7+x*2;assert(wire[offset]==(cells[y*32+x]&255));assert(wire[offset+1]==ui16_wire_high(cells[y*32+x]));}
     if(b.selected_file()==70){
         std::ofstream f("build-ui16-host/wrap_cells.hex");char word[16];
-        for(int i=0;i<512;++i){std::snprintf(word,sizeof(word),"%04x\n",i<CELL_COUNT?cells[i]:0);f<<word;}
+        for(int i=0;i<1024;++i){std::snprintf(word,sizeof(word),"%04x\n",i<CELL_COUNT?cells[i]:0);f<<word;}
     }
 }
 int main(int argc,char **argv){
@@ -85,15 +82,13 @@ int main(int argc,char **argv){
     for(const auto &bad:std::vector<std::string>{R"(A\tB)",R"(\nA)",R"(A\nB\nC)"}){old=g.titles;assert(!parse(bad,g)&&g.titles==old);}
     // Exact glyph positions, indentation, selected attribute on both rows.
     g.titles={u8"日本\nテスト"};std::uint16_t cells[CELL_COUNT];ui16_build_game_menu("NES",g,0,cells);
-    assert(cells[3*32+2]==(glyph(U'日')|4096));
-    assert(cells[4*32+2]==4096&&cells[4*32+3]==(glyph(U'テ')|4096));
-    assert(cells[4*32+9]==(glyph('/')|4096));
-    // A two-row item at the lower boundary is not partially shown.
-    g={};g.status=Ui16ListStatus::Ready;
-    for(int i=0;i<9;++i)g.names.push_back("A");
-    g.names.push_back(std::string(31,'B'));
-    ui16_build_game_menu("NES",g,0,cells,0);for(int x=0;x<32;++x)assert(cells[12*32+x]==0);
-    assert(ui16_game_scroll_top(g,9,0)==1);
+    assert(cells[12*32+2]==(glyph(U'日')|UI16_SELECTED));
+    assert(cells[14*32+2]==UI16_SELECTED&&cells[14*32+3]==(glyph(U'テ')|UI16_SELECTED));
+    assert(cells[14*32+9]==(glyph('/')|UI16_SELECTED));
+    for(int y=UI16_MENU_FIRST_ROW;y<12;++y)
+        for(int x=0;x<32;++x)assert(cells[y*32+x]==0);
+    for(int y=16;y<UI16_MENU_END_ROW;++y)
+        for(int x=0;x<32;++x)assert(cells[y*32+x]==0);
     // 137 mixed-height entries, folder restore, reverse movement and changed order.
     root_list={};root_list.status=Ui16ListStatus::Ready;
     for(int i=0;i<137;++i){root_list.names.push_back(i==70?"child":"g"+std::to_string(i)+".nes");root_list.titles.push_back(i%3?u8"日本\\nテスト":std::string(40,'A'));root_list.directories.push_back(i==70);}
@@ -105,17 +100,18 @@ int main(int argc,char **argv){
     auto tap=[&](unsigned button){b.update(0,t+=10,load);return b.update(button,t+=10,load);};
     assert(tap(0x0100));
     for(int i=0;i<137;++i){assert(b.selected_file()==i);verify(b);if(i<136)assert(tap(UI16_BUTTON_DOWN));}
-    assert(!tap(UI16_BUTTON_DOWN));
+    assert(!tap(UI16_BUTTON_DOWN)&&b.selected_file()==136);verify(b);
     for(int i=135;i>=70;--i){assert(tap(UI16_BUTTON_UP));verify(b);}
     const int saved=b.file_top();assert(tap(0x0001)&&b.relative_path()=="child");
     assert(tap(0x0002)&&b.selected_file()==70&&b.file_top()==saved);verify(b);
     assert(tap(0x0100));root_list.names.insert(root_list.names.begin(),"new.nes");root_list.titles.insert(root_list.titles.begin(),"NEW");root_list.directories.insert(root_list.directories.begin(),false);
     assert(tap(0x0200)&&b.selected_file()==71);verify(b);
-    for(int i=70;i>=0;--i){assert(tap(UI16_BUTTON_UP));verify(b);}assert(b.file_top()==0&&!tap(UI16_BUTTON_UP));
+    for(int i=70;i>=0;--i){assert(tap(UI16_BUTTON_UP));verify(b);}assert(b.file_top()==0&&!tap(UI16_BUTTON_UP)&&b.selected_file()==0);
     // System names use the same two-row rules and viewport calculation.
     Ui16MenuEntry many[17];for(auto &e:many)e={3,"ABCDEFGHIJKLMNOPQRSTUVWXYZ12345"};
     Ui16Browser system_browser(many,17,16);assert(system_browser.system_top()==12);
     ui16_build_system_menu(many,17,cells,16,system_browser.system_top());
-    assert(cells[11*32+2]&4096);assert(cells[12*32+2]==4096&&cells[12*32+3]&4096);
+    assert(cells[12*32+2]&UI16_SELECTED);
+    assert(cells[14*32+2]==UI16_SELECTED&&cells[14*32+3]&UI16_SELECTED);
     std::puts("Wrap tests passed: 30/29 widths, UTF-8 boundaries, forced escapes/errors, directory suffix, indentation, whole-item scrolling, 137 mixed entries, restore, system menu, UART");
 }

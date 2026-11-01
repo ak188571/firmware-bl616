@@ -48,34 +48,33 @@ static unsigned glyph(unsigned cp){for(auto e:ui16_font_map)if(e.codepoint==cp)r
 static void check_frame(const Ui16Browser &b) {
     std::uint16_t cells[CELL_COUNT];
     ui16_build_game_menu(b.heading(),b.game_list(),b.selected_file(),cells,b.file_top());
+    for (int row : {2,25})
+        for (int x=0; x<32; ++x) assert(cells[row*32+x]==0);
+    const auto selected_layout=ui16_layout_text(ui16_game_label(b.game_list(),b.selected_file()));
+    const int selected_y=(MENU_ROWS-selected_layout.count*GLYPH_VERTICAL_UNITS)/2;
+    if(b.selected_file()==0)
+        for(int row=UI16_MENU_FIRST_ROW;row<selected_y;++row)
+            for(int x=0;x<32;++x)assert(cells[row*32+x]==0);
+    if(static_cast<std::size_t>(b.selected_file()+1)==b.game_list().names.size())
+        for(int row=selected_y+selected_layout.count*GLYPH_VERTICAL_UNITS;row<UI16_MENU_END_ROW;++row)
+            for(int x=0;x<32;++x)assert(cells[row*32+x]==0);
     int highlighted=0;
     for(int row=0;row<MENU_ROWS;++row) {
         bool select=false;
         for(int x=0;x<32;++x)select|=(cells[row*32+x]&4096)!=0;
-        if(select){++highlighted;assert(row==UI16_MENU_FIRST_ROW+b.selected_file()-b.file_top());}
+        if(select){++highlighted;assert(row>=selected_y&&row<selected_y+selected_layout.count*GLYPH_VERTICAL_UNITS);}
     }
-    assert(highlighted==1);
+    assert(highlighted==selected_layout.count*GLYPH_VERTICAL_UNITS);
     if(b.selected_file()==9 || b.selected_file()==10 || b.selected_file()==136) {
         const auto path="build-ui16-host/scroll_"+std::to_string(b.selected_file());
         std::ofstream hex(path+".hex");char word[16];
-        for(int i=0;i<512;++i){std::snprintf(word,sizeof(word),"%04x\n",i<CELL_COUNT?cells[i]:0);hex<<word;}
+        for(int i=0;i<1024;++i){std::snprintf(word,sizeof(word),"%04x\n",i<CELL_COUNT?cells[i]:0);hex<<word;}
     }
-    for(int row=0;row<UI16_MENU_CAPACITY;++row) {
-        const int index=b.file_top()+row;
-        if(index>=static_cast<int>(b.game_list().names.size()))break;
-        const auto &g=b.game_list();
-        Ui16GameList one;one.status=Ui16ListStatus::Ready;
-        one.names={g.names[index]};one.directories={g.directories[index]};
-        if(index<static_cast<int>(g.titles.size()))one.titles={g.titles[index]};
-        std::uint16_t expected[CELL_COUNT];
-        ui16_build_game_menu("",one,index==b.selected_file()?0:-1,expected);
-        for(int x=0;x<32;++x)assert(cells[(3+row)*32+x]==expected[3*32+x]);
-    }
-    assert(cells[13*32+2]==glyph('X') && cells[13*32+3]==glyph('/'));
-    assert(cells[13*32+6]==glyph(0x623b) && cells[13*32+8]==glyph(0x308b));
+    assert(cells[26*32+2]==glyph('X') && cells[26*32+3]==glyph('/'));
+    assert(cells[26*32+6]==glyph(0x623b) && cells[26*32+8]==glyph(0x308b));
     wire.clear();ui16_send_game_menu(b.heading(),b.game_list(),b.selected_file(),b.file_top());
-    assert(wire.size()==994 && critical_depth==0);
-    for(int y=0;y<14;++y)for(int x=0;x<32;++x) {
+    assert(wire.size()==1988 && critical_depth==0);
+    for(int y=0;y<MENU_ROWS;++y)for(int x=0;x<32;++x) {
         const auto offset=y*71+7+2*x;
         assert(wire[offset]==(cells[y*32+x]&255));
         assert(wire[offset+1]==ui16_wire_high(cells[y*32+x]));
@@ -103,6 +102,7 @@ int main() {
         if(i<136)assert(tap(UI16_BUTTON_DOWN));
     }
     assert(!tap(UI16_BUTTON_DOWN)&&b.selected_file()==136);
+    check_frame(b);
     for(int i=135;i>=70;--i)assert(tap(UI16_BUTTON_UP));
     const int top=b.file_top();assert(top==70);
     assert(tap(0x0001)&&b.relative_path()=="child"&&b.file_top()==0);
@@ -112,10 +112,12 @@ int main() {
     // Restore by name after filesystem order changes; adjust viewport only as needed.
     assert(tap(0x0100));
     dirs["sd:nes"].insert(dirs["sd:nes"].begin(),{"inserted.nes"});
-    assert(tap(0x0200)&&b.selected_file()==71&&b.file_top()==70); // X returns
+    assert(tap(0x0200)&&b.selected_file()==70&&b.file_top()==70); // CSV-listed child stays at index 70; unlisted file follows listed entries.
     check_frame(b);
-    for(int i=70;i>=0;--i){assert(tap(UI16_BUTTON_UP));check_frame(b);}
-    assert(b.file_top()==0&&!tap(UI16_BUTTON_UP));
+    for(int i=69;i>=0;--i){assert(tap(UI16_BUTTON_UP));check_frame(b);}
+    assert(b.file_top()==0&&!tap(UI16_BUTTON_UP)&&b.selected_file()==0);
+    check_frame(b);
+    assert(tap(UI16_BUTTON_DOWN)&&b.selected_file()==1);
     // Conflicting actions and held buttons never cross a hierarchy.
     assert(!tap(0x0102));
     assert(!b.update(0x0100,t+=10,load));
@@ -128,7 +130,7 @@ int main() {
     for(int i=0;i<22;++i){m.update(0,t+=10,load);assert(m.update(UI16_BUTTON_DOWN,t+=10,load));}
     assert(m.selected_system()==22&&m.system_top()==13);
     std::uint16_t cells[CELL_COUNT];ui16_build_system_menu(many,23,cells,22,m.system_top());
-    assert(cells[12*32+2]&4096);
+    assert(cells[13*32+2]&UI16_SELECTED);
     m.update(0,t+=10,load);assert(m.update(0x0001,t+=10,load));
     m.update(0,t+=10,load);assert(m.update(0x0200,t+=10,load));
     assert(!m.in_games()&&m.selected_system()==22&&m.system_top()==13);
@@ -148,6 +150,6 @@ int main() {
     assert(g.names.size()==256&&g.more);
     Ui16Navigation full(256);
     for(int i=1;i<256;++i){full.update(0,i*20);assert(full.update(UI16_BUTTON_DOWN,i*20+1));}
-    assert(full.selected()==255&&!full.update(UI16_BUTTON_DOWN,100000));
-    std::puts("Stage 5 tests passed: 137-entry bidirectional scrolling, translated rows, UART frames, viewport restore/reorder, A/B/X/Y edges, 23 systems, bounds/repeat, 256-entry limit");
+    assert(full.selected()==255&&!full.update(UI16_BUTTON_DOWN,100000)&&full.selected()==255);
+    std::puts("Stage 5 tests passed: 137-entry bounded scrolling, translated rows, UART frames, viewport restore/reorder, A/B/X/Y edges, 23 systems, repeat, 256-entry limit");
 }

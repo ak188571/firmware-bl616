@@ -48,12 +48,13 @@ int main()
 
     Ui16Navigation edge(8);
     assert(!edge.update(up, 0) && edge.selected() == 0);
-    assert(!edge.update(up, 400));
-    assert(edge.update(down, 401) && edge.selected() == 1);
-    for (int i=0; i<6; ++i) assert(edge.update(down, 801+i*100));
-    assert(edge.selected() == 7);
-    assert(!edge.update(down, 1401) && edge.selected() == 7);
-    assert(edge.update(up, 1402) && edge.selected() == 6);
+    assert(!edge.update(up, 400) && edge.selected() == 0); // Held input stays at the edge.
+    edge.update(0,401);assert(edge.update(down, 402) && edge.selected() == 1);
+    edge.update(0,403);assert(edge.update(up, 404) && edge.selected() == 0);
+    Ui16Navigation last(8,7);
+    assert(!last.update(down, 0) && last.selected() == 7);
+    assert(!last.update(down, 400) && last.selected() == 7);
+    last.update(0,401);assert(last.update(up, 402) && last.selected() == 6);
     Ui16Navigation empty(0), single(1), cap(999,999), negative(8,-10);
     assert(empty.selected() == -1 && !empty.update(down, 0) && !empty.update(up, 1));
     assert(single.selected() == 0 && !single.update(up, 0) && !single.update(down, 1));
@@ -73,20 +74,18 @@ int main()
         {1,"NES"},{2,"SNES"},{3,"Game Boy Advance"},{4,"MegaDrive / Genesis"},
         {5,"Sega Master System"},{6,"IBM PC/XT"},{-1,"CORES"},{-2,"OPTIONS"}
     };
-    std::uint16_t baseline[CELL_COUNT], cells[CELL_COUNT];
-    ui16_build_system_menu(entries,8,baseline,0);
+    std::uint16_t cells[CELL_COUNT];
     for (int selected=0; selected<8; ++selected) {
         ui16_build_system_menu(entries,8,cells,selected);
-        for (int i=0; i<CELL_COUNT; ++i) {
-            assert((cells[i]&~4096)==(baseline[i]&~4096)); // no stale/mutated glyphs
-            if (i/32 != UI16_MENU_FIRST_ROW+selected) assert((cells[i]&4096)==0);
-        }
-        assert(cells[(UI16_MENU_FIRST_ROW+selected)*32+2]&4096); // includes CORES/OPTIONS
+        for (int i=0; i<CELL_COUNT; ++i)
+            if (i/32 != 13 && i/32 != 14) assert((cells[i]&UI16_SELECTED)==0);
+        assert(cells[13*32+2]&UI16_SELECTED); // every selection is centered.
+        assert(cells[14*32+2]&UI16_VERTICAL_HALF);
         bytes.clear(); sections=0;
         ui16_send_system_menu(entries,8,selected);
-        assert(bytes.size()==994 && sections==14 && critical_depth==0);
+        assert(bytes.size()==1988 && sections==28 && critical_depth==0);
         std::size_t pos=0;
-        for (int y=0; y<14; ++y) {
+        for (int y=0; y<MENU_ROWS; ++y) {
             for (int b : {0xaa,0,68,15,y,0,32}) assert(bytes[pos++]==b);
             for (int x=0; x<32; ++x) {
                 assert(bytes[pos++]==(cells[y*32+x]&255));
@@ -96,8 +95,8 @@ int main()
         char path[100], word[16];
         std::snprintf(path,sizeof(path),"build-ui16-host/selected_%d.hex",selected);
         std::ofstream hex(path);
-        for (int i=0; i<512; ++i) {
-            std::snprintf(word,sizeof(word),"%03x\n",i<CELL_COUNT?cells[i]:0); hex<<word;
+        for (int i=0; i<1024; ++i) {
+            std::snprintf(word,sizeof(word),"%04x\n",i<CELL_COUNT?cells[i]:0); hex<<word;
         }
     }
     ui16_build_system_menu(entries,8,cells,999);
@@ -107,5 +106,5 @@ int main()
         assert(ui16_display_command(cmd,false)==cmd);
         assert(ui16_display_command(cmd,true)==(cmd==5 ? 13 : cmd));
     }
-    std::puts("Stage 2 tests passed: taps, repeat 400/100ms, release, reversal, bounds, simultaneous input, timer wrap, 8 selections, 994-byte frames, display ownership");
+    std::puts("UI16 navigation tests passed: taps, repeat 400/100ms, release, reversal, bounded edges, simultaneous input, timer wrap, 8 selections, 1988-byte frames, display ownership");
 }

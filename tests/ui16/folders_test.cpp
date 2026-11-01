@@ -51,7 +51,7 @@ int main(){
     dirs["sd:nes"]={{"action",AM_DIR},{"puzzle",AM_DIR},{"root.nes"},{"empty",AM_DIR},{"missing",AM_DIR},{"bad",AM_DIR},{".",AM_DIR},{"..",AM_DIR},{"hidden",AM_DIR|AM_HID}};
     dirs["sd:nes/action"]={{"nested",AM_DIR},{"A.NES"}};
     dirs["sd:nes/action/nested"]={{"deep.nes"}};dirs["sd:nes/puzzle"]={{"P.NES"}};dirs["sd:nes/empty"]={};dirs["sd:nes/bad"]={{"bad.nes"}};
-    csvs["sd:nes/titles.csv"]=u8"name\ttitle\naction\tアクション\npuzzle\tパズル\nroot.nes\tROOT\n";
+    csvs["sd:nes/titles.csv"]=u8"name\ttitle\naction\tアクション\npuzzle\tパズル\nroot.nes\tROOT\nempty\t\nmissing\t\nbad\t\n";
     csvs["sd:nes/action/titles.csv"]=u8"name\ttitle\nnested\t日本\nA.NES\tABC\n";
     csvs["sd:nes/action/nested/titles.csv"]=u8"name\ttitle\ndeep.nes\tカナ\n";
     csvs["sd:nes/bad/titles.csv"]="name,title\nbad.nes,bad\n";
@@ -61,16 +61,16 @@ int main(){
     assert(b.game_list().names.size()==6&&b.game_list().directories[0]);
     assert(b.game_list().titles[0]==u8"アクション");
     std::uint16_t cells[CELL_COUNT];ui16_build_game_menu(b.heading(),b.game_list(),0,cells);
-    assert((cells[3*32+12]&4095)==glyph('/')); // Japanese folder label plus slash.
-    ui16_send_game_menu(b.heading(),b.game_list(),0);assert(wire.size()==994);
-    std::ofstream hex("build-ui16-host/folders_cells.hex");char word[16];for(int i=0;i<512;++i){std::snprintf(word,sizeof(word),"%04x\n",i<CELL_COUNT?cells[i]:0);hex<<word;}
+    assert((cells[5*32+12]&4095)==glyph('/')); // Japanese folder label plus slash in a fixed six-item list.
+    ui16_send_game_menu(b.heading(),b.game_list(),0);assert(wire.size()==1988);
+    std::ofstream hex("build-ui16-host/folders_cells.hex");char word[16];for(int i=0;i<1024;++i){std::snprintf(word,sizeof(word),"%04x\n",i<CELL_COUNT?cells[i]:0);hex<<word;}
     std::ofstream packet("build-ui16-host/folders_frame.bin",std::ios::binary);packet.write(reinterpret_cast<const char*>(wire.data()),wire.size());
     assert(press(UI16_BUTTON_CONFIRM)&&b.relative_path()=="action"&&std::string(b.heading())==u8"アクション");
     const auto calls=loaded.size();assert(!b.update(UI16_BUTTON_CONFIRM,t+=500,load)&&loaded.size()==calls);
     assert(press(UI16_BUTTON_CONFIRM)&&b.relative_path()=="action/nested"&&std::string(b.heading())==u8"日本");
     assert(b.game_list().titles[0]==u8"カナ");
     dirs["sd:nes/action"].insert(dirs["sd:nes/action"].begin(),{"new.nes"});
-    assert(press(UI16_BUTTON_BACK)&&b.relative_path()=="action"&&b.selected_file()==1); // restore by name, not old index
+    assert(press(UI16_BUTTON_BACK)&&b.relative_path()=="action"&&b.selected_file()==0); // CSV order keeps nested first; restore by real name.
     assert(press(UI16_BUTTON_BACK)&&b.relative_path().empty()&&b.selected_file()==0);
     assert(press(UI16_BUTTON_DOWN)&&b.selected_file()==1);
     assert(press(UI16_BUTTON_CONFIRM)&&b.relative_path()=="puzzle");

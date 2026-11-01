@@ -49,9 +49,9 @@ static void reset_fs() {
     directory.clear(); opens=closes=0; read_error_at=-1; open_error=close_error=false;
 }
 static void save_frame(const char *name,const std::uint16_t (&cells)[CELL_COUNT]) {
-    assert(bytes.size()==994 && critical_depth==0 && sections==14);
+    assert(bytes.size()==1988 && critical_depth==0 && sections==28);
     std::size_t pos=0;
-    for(int y=0;y<14;++y) {
+    for(int y=0;y<MENU_ROWS;++y) {
         for(int b:{0xaa,0,68,15,y,0,32}) assert(bytes[pos++]==b);
         for(int x=0;x<32;++x) {
             assert(bytes[pos++]==(cells[y*32+x]&255));
@@ -60,7 +60,7 @@ static void save_frame(const char *name,const std::uint16_t (&cells)[CELL_COUNT]
     }
     std::ofstream file(std::string("build-ui16-host/")+name+".hex");
     char word[16];
-    for(int i=0;i<512;++i) { std::snprintf(word,sizeof(word),"%03x\n",i<CELL_COUNT?cells[i]:0); file<<word; }
+    for(int i=0;i<1024;++i) { std::snprintf(word,sizeof(word),"%04x\n",i<CELL_COUNT?cells[i]:0); file<<word; }
     bytes.clear(); sections=0;
 }
 
@@ -146,21 +146,20 @@ int main() {
     games={}; games.names={"ABC.nes","DEF.NES"}; games.status=Ui16ListStatus::Ready;
     std::uint16_t cells[CELL_COUNT];
     ui16_build_game_menu("NES",games,1,cells);
-    assert(cells[3*32+2]==62 && cells[4*32+2]==(55|4096));
+    assert(cells[11*32+2]==62 && cells[14*32+2]==(55|UI16_SELECTED));
     for(int i=0;i<CELL_COUNT;++i) {
-        if(i/32!=4) assert((cells[i]&4096)==0);
-        if(i/32>=5 && i/32<13) assert(cells[i]==0);
+        if(i/32!=14&&i/32!=15) assert((cells[i]&UI16_SELECTED)==0);
     }
     ui16_send_game_menu("NES",games,1); save_frame("game_list",cells);
     games.more=true;
     ui16_build_game_menu("SNES",games,0,cells);
-    assert(cells[13*32+12]!=0); // MORE FILES hint
+    assert(cells[26*32+12]!=0); // LIST LIMIT hint
     ui16_send_game_menu("SNES",games,0); save_frame("game_more",cells);
     for(auto status:{Ui16ListStatus::Empty,Ui16ListStatus::DirectoryError,Ui16ListStatus::ReadError}) {
         games={};games.status=status;
         ui16_build_game_menu("NES",games,-1,cells);
         for(auto cell:cells) assert((cell&4096)==0);
-        assert(cells[3*32+2]!=0 && cells[13*32+2]==gid_x); // message plus A BACK
+        assert(cells[13*32+2]!=0 && cells[26*32+2]==gid_x); // message plus X/Y Back
         ui16_send_game_menu("NES",games,-1);
         save_frame(status==Ui16ListStatus::Empty?"game_empty":status==Ui16ListStatus::DirectoryError?"game_directory_error":"game_read_error",cells);
     }

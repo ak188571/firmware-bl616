@@ -1,6 +1,8 @@
 #ifdef UI16_SYSTEM_MENU
 #include "ui16_titles.h"
 #include "ui16_text_layout.h"
+#include <algorithm>
+#include <numeric>
 #include <string_view>
 #include <utility>
 extern "C" {
@@ -14,6 +16,16 @@ bool equal_name(std::string_view a, std::string_view b) {
         if(lower(a[i])!=lower(b[i])) return false;
     }
     return true;
+}
+bool less_name(std::string_view a, std::string_view b) {
+    const auto n=std::min(a.size(),b.size());
+    for(std::size_t i=0;i<n;++i) {
+        auto lower=[](unsigned char c){return c>='A'&&c<='Z'?c+32:c;};
+        const auto ac=lower(a[i]),bc=lower(b[i]);
+        if(ac!=bc)return ac<bc;
+    }
+    if(a.size()!=b.size())return a.size()<b.size();
+    return a<b;
 }
 bool valid_title(std::string_view s) {
     for(std::size_t i=0;i<s.size();) {
@@ -53,9 +65,12 @@ bool Ui16TitlesParser::line() {
     std::string decoded;
     if(!ui16_decode_title(title,decoded))return false;
     for(unsigned char c:name)if(c<32||c>126||std::string_view("<>:\"/\\|?*").find(c)!=std::string_view::npos)return false;
+    for(const auto &existing:csv_names_)if(equal_name(name,existing))return false;
+    csv_names_.emplace_back(name);
     for(std::size_t i=0;i<games_.names.size();++i)if(equal_name(name,games_.names[i])) {
         if(seen_[i])return false;
         seen_[i]=true;
+        order_.push_back(i);
         if(!blank_title(title)){
             const bool folder=i<games_.directories.size()&&games_.directories[i];
             if(!ui16_layout_text(decoded+(folder?"/":"")).valid)return false;
@@ -80,7 +95,25 @@ bool Ui16TitlesParser::feed(const char *data,std::size_t length) {
 }
 bool Ui16TitlesParser::finish() {
     if(failed_||(!line_.empty()&&!line())||first_)return false;
-    games_.titles=std::move(pending_);
+    std::vector<std::size_t> remaining;
+    for(std::size_t i=0;i<games_.names.size();++i)if(!seen_[i])remaining.push_back(i);
+    std::sort(remaining.begin(),remaining.end(),[&](std::size_t a,std::size_t b){
+        return less_name(games_.names[a],games_.names[b]);
+    });
+    order_.insert(order_.end(),remaining.begin(),remaining.end());
+    std::vector<std::string> names,titles;
+    names.reserve(order_.size());titles.reserve(order_.size());
+    const bool have_directories=games_.directories.size()==games_.names.size();
+    std::vector<bool> directories;
+    if(have_directories)directories.reserve(order_.size());
+    for(auto index:order_) {
+        names.push_back(std::move(games_.names[index]));
+        titles.push_back(std::move(pending_[index]));
+        if(have_directories)directories.push_back(games_.directories[index]);
+    }
+    games_.names=std::move(names);
+    games_.titles=std::move(titles);
+    if(have_directories)games_.directories=std::move(directories);
     return true;
 }
 void ui16_load_titles(const char *path,Ui16GameList &games) {
