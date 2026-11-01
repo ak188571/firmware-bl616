@@ -27,6 +27,11 @@ bool fpga_program(const char *){return program_ok;}
 static uint64_t now=0;static int id=1,requests=0;
 uint64_t bflb_mtimer_get_time_ms(){return now;}
 void delay(unsigned ms){now+=ms;}
+static unsigned starting_frames=0,tx_waits=0;
+static int tx_done=0,uart_device=0;
+static int *uart1_dev=&uart_device;
+void ui16_send_starting_game(){++starting_frames;}
+int bflb_uart_wait_tx_done(int *dev){assert(dev==uart1_dev);++tx_waits;return tx_done;}
 void send_blank_packet(){}
 int get_core_id(){++requests;now+=200;return id;}
 static int result=0;static bool started=true;
@@ -63,6 +68,10 @@ int main(){
  assert(!ui16_hw_load_rom(999,"x",nullptr));
  ui16_hw_display_owner(true,nullptr);assert(owner&&overlay_on());
  ui16_hw_display_owner(false,nullptr);assert(!owner&&overlay_on());
+ const auto before_notice=now;
+ assert(ui16_hw_starting(nullptr)&&starting_frames==1&&tx_waits==1&&now==before_notice+500);
+ tx_done=-1;
+ assert(!ui16_hw_starting(nullptr)&&starting_frames==2&&tx_waits==2&&now==before_notice+500);
  overlay(0);pads={{0,0,0x0200,0},{0,0,0x0200,0},{0,0,0x0002,0},{0,0,0,0},{0,0,0x84,0}};
  send_hid_to_core();assert((bytes==std::vector<unsigned>{2,0,0,0,0,2,0,0,0,0,0,0}));
  // Split chords from two controllers must not open the OSD.
@@ -146,6 +155,7 @@ void ui16_hw_display_owner(bool,void *);
 Ui16GameList ui16_load_for_core(int,const char *,void *);
 void fpga_use_ui16_display(bool);
 bool ui16_hw_osd_ready(void *);
+bool ui16_hw_starting(void *);
 void overlay_osd_window(unsigned,unsigned,unsigned,unsigned);
 void ui16_osd_menu_input_loop();
 void delay(unsigned);

@@ -32,6 +32,7 @@ const char *ui16_launch_error_text(Ui16LaunchError error)
     case Ui16LaunchError::RomFailed:return "ROM LOAD ERROR";
     case Ui16LaunchError::MonitorProgramFailed:return "MONITOR WRITE ERROR";
     case Ui16LaunchError::MonitorTimeout:return "MONITOR ID TIMEOUT";
+    case Ui16LaunchError::StartingDisplayFailed:return "STARTING DISPLAY ERROR";
     }
     return "LAUNCH ERROR";
 }
@@ -50,6 +51,7 @@ Ui16LaunchError Ui16Runtime::launch(const char *drive,const Ui16LaunchTarget &ta
     if(!ops_.find_core(target.core_file.c_str(),core,ops_.context))return Ui16LaunchError::MissingCore;
     // Verify the return route before replacing the monitor FPGA image.
     if(!ops_.find_core("monitor.bin",monitor,ops_.context))return Ui16LaunchError::MissingMonitor;
+    if(ops_.starting&&!ops_.starting(ops_.context))return Ui16LaunchError::StartingDisplayFailed;
     monitor_ready_=false;
     ops_.display_owner(false,ops_.context);
     if(!ops_.program(core.c_str(),ops_.context))return Ui16LaunchError::ProgramFailed;

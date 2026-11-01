@@ -14,7 +14,8 @@ struct Ui16LaunchTarget {
 };
 
 enum class Ui16LaunchError { None, InvalidSelection, MissingRom, MissingCore, MissingMonitor,
-    ProgramFailed, CoreTimeout, RomFailed, OsdUnsupported, MonitorProgramFailed, MonitorTimeout };
+    ProgramFailed, CoreTimeout, RomFailed, OsdUnsupported, MonitorProgramFailed, MonitorTimeout,
+    StartingDisplayFailed };
 const char *ui16_launch_error_text(Ui16LaunchError error);
 
 // Hardware adapters perform bounded waits and reuse the existing ROM loader.
@@ -27,6 +28,8 @@ struct Ui16LaunchOps {
     bool (*load_rom)(int core_id,const char *path,void *)=nullptr;
     void (*display_owner)(bool ui16,void *)=nullptr;
     bool (*osd_ready)(void *)=nullptr;
+    // Finish the monitor's launch notice before handing the FPGA to the game.
+    bool (*starting)(void *)=nullptr;
 };
 
 class Ui16Runtime {

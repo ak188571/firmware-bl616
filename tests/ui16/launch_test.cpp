@@ -22,7 +22,7 @@ void fpga_tx_byte(std::uint8_t){}
 void fpga_tx_header(int,int){}
 struct Fake {
     std::vector<std::string> calls;
-    bool rom=true,core=true,monitor=true,program=true,wait=true,load=true,owner=true,capable=true;
+    bool rom=true,core=true,monitor=true,program=true,wait=true,load=true,owner=true,capable=true,notice=true;
     static Fake &get(void *p){return *static_cast<Fake*>(p);}
     static bool file(const char *p,void *v){auto &f=get(v);f.calls.push_back("stat:"+std::string(p));return f.rom;}
     static bool find(const char *n,std::string &p,void *v){auto &f=get(v);f.calls.push_back("find:"+std::string(n));p="sd:cores/console138k/"+std::string(n);return std::string(n)=="monitor.bin"?f.monitor:f.core;}
@@ -31,7 +31,8 @@ struct Fake {
     static bool romload(int id,const char *p,void *v){auto &f=get(v);f.calls.push_back("load:"+std::to_string(id)+":"+p);return f.load;}
     static void display(bool owner,void *v){auto &f=get(v);f.calls.push_back(owner?"ui16":"legacy");f.owner=owner;}
     static bool caps(void *v){return get(v).capable;}
-    Ui16LaunchOps ops(){return {this,file,find,prog,probe,romload,display,caps};}
+    static bool starting(void *v){auto &f=get(v);assert(f.owner);f.calls.push_back("starting");return f.notice;}
+    Ui16LaunchOps ops(){return {this,file,find,prog,probe,romload,display,caps,starting};}
 };
 static Ui16GameList data;
 static Ui16GameList loader(int,const char *path,void *){
@@ -43,7 +44,7 @@ int main(){
     const Ui16LaunchRequest req{1,"action/nested","Real_Name.NES"};
     Fake f;Ui16Runtime runtime(f.ops());assert(runtime.launch("sd:",target,req)==Ui16LaunchError::None);
     assert(!runtime.monitor_ready()&&!f.owner);
-    assert((f.calls==std::vector<std::string>{"stat:sd:nes/action/nested/Real_Name.NES","find:nestang.bin","find:monitor.bin","legacy","program:sd:cores/console138k/nestang.bin","wait:1","load:1:sd:nes/action/nested/Real_Name.NES"}));
+    assert((f.calls==std::vector<std::string>{"stat:sd:nes/action/nested/Real_Name.NES","find:nestang.bin","find:monitor.bin","starting","legacy","program:sd:cores/console138k/nestang.bin","wait:1","load:1:sd:nes/action/nested/Real_Name.NES"}));
     assert(runtime.restore_monitor()==Ui16LaunchError::None&&runtime.monitor_ready()&&f.owner);
     assert(f.calls[f.calls.size()-2]=="wait:0"&&f.calls.back()=="ui16");
     const auto n=f.calls.size();assert(runtime.restore_monitor()==Ui16LaunchError::None&&f.calls.size()==n);
@@ -59,8 +60,23 @@ int main(){
     for(auto expected:{Ui16LaunchError::MissingRom,Ui16LaunchError::MissingCore,Ui16LaunchError::MissingMonitor}){
         Fake bad;bad.rom=expected!=Ui16LaunchError::MissingRom;bad.core=expected!=Ui16LaunchError::MissingCore;bad.monitor=expected!=Ui16LaunchError::MissingMonitor;
         Ui16Runtime r(bad.ops());assert(r.launch("sd:",target,req)==expected&&r.monitor_ready()&&bad.owner);
-        for(auto &c:bad.calls)assert(c!="legacy"&&c.find("program:")!=0&&c.find("load:")!=0);
+        for(auto &c:bad.calls)assert(c!="starting"&&c!="legacy"&&c.find("program:")!=0&&c.find("load:")!=0);
     }
+    // A failed notice must leave the monitor usable and never start reconfiguration.
+    Fake notice;notice.notice=false;Ui16Runtime notice_runtime(notice.ops());
+    assert(notice_runtime.launch("sd:",target,req)==Ui16LaunchError::StartingDisplayFailed);
+    assert(notice_runtime.monitor_ready()&&notice.owner);
+    assert((notice.calls==std::vector<std::string>{"stat:sd:nes/action/nested/Real_Name.NES","find:nestang.bin","find:monitor.bin","starting"}));
+    const auto notice_calls=notice.calls.size();
+    assert(notice_runtime.restore_monitor()==Ui16LaunchError::None&&notice.calls.size()==notice_calls);
+    notice.notice=true;assert(notice_runtime.launch("sd:",target,req)==Ui16LaunchError::None);
+    assert(std::string(ui16_launch_error_text(Ui16LaunchError::StartingDisplayFailed))=="STARTING DISPLAY ERROR");
+    // Existing callers may omit the optional notice callback.
+    Fake compatible;
+    Ui16LaunchOps compatible_ops{&compatible,Fake::file,Fake::find,Fake::prog,Fake::probe,Fake::romload,Fake::display,Fake::caps};
+    Ui16Runtime compatible_runtime(compatible_ops);
+    assert(compatible_runtime.launch("sd:",target,req)==Ui16LaunchError::None);
+    for(const auto &call:compatible.calls)assert(call!="starting");
     Fake recover;Ui16Runtime rr(recover.ops());assert(rr.launch("sd:",target,req)==Ui16LaunchError::None);
     recover.monitor=false;assert(rr.restore_monitor()==Ui16LaunchError::MissingMonitor&&!rr.monitor_ready());
     recover.monitor=true;recover.program=false;assert(rr.restore_monitor()==Ui16LaunchError::MonitorProgramFailed);
