@@ -16,31 +16,32 @@ const char *strength(unsigned n) {
     return names[n&3u];
 }
 struct CrtMenu:Menu {
-    explicit CrtMenu(bool blur):blur_supported(blur){}
-    const bool blur_supported;
+    explicit CrtMenu(bool blur,bool scan):blur_supported(blur),scan_supported(blur&&scan){}
+    const bool blur_supported,scan_supported;
     std::uint32_t last_poll=0;
     bool matched=false;
     int osd_width()const override{return 23;}
     void render()override {
-        overlay_clear();overlay_cursor(0,0);overlay_printf("%s",blur_supported?"H BLUR READY - STAGE4A":"BYPASS ONLY - STAGE 1");
+        overlay_clear();overlay_cursor(0,0);overlay_printf("%s",scan_supported?"CRT READY - STAGE4B":blur_supported?"H BLUR READY - STAGE4A":"BYPASS ONLY - STAGE 1");
         overlay_cursor(0,1);overlay_printf("SESSION ONLY / NO SAVE");
         overlay_cursor(0,3);overlay_printf("%s %s",blur_supported?"CRT ENABLE  ":"CRT REQUEST ",settings.enabled?"ON":"OFF");
         overlay_cursor(0,4);overlay_printf("%s %s",blur_supported?"H BLUR      ":"H BLUR REQ  ",strength(settings.blur));
-        overlay_cursor(0,5);if(blur_supported)overlay_printf("SCANLINE     NOT YET");
+        overlay_cursor(0,5);if(scan_supported)overlay_printf("SCANLINE     %s",strength(settings.scanline));
+        else if(blur_supported)overlay_printf("SCANLINE     NOT YET");
         else overlay_printf("SCANLINE REQ %s",strength(settings.scanline));
         overlay_cursor(0,7);overlay_printf("APPLY: %s",matched?"FRAME ACK":"WAITING");
         overlay_cursor(0,9);overlay_printf("CLOSE");
     }
-    std::vector<int> get_options()override{if(blur_supported)return {3,4,9};return {3,4,5,9};}
+    std::vector<int> get_options()override{if(blur_supported&&!scan_supported)return {3,4,9};return {3,4,5,9};}
     bool on_adjust(int row,int delta)override {
         if(row==0)settings.enabled=!settings.enabled;
         else if(row==1)settings.blur=(settings.blur+(delta>0?1:3))%4;
-        else if(row==2&&!blur_supported)settings.scanline=(settings.scanline+(delta>0?1:3))%4;
+        else if(row==2&&(!blur_supported||scan_supported))settings.scanline=(settings.scanline+(delta>0?1:3))%4;
         else return false;
         matched=false;send_settings();return true;
     }
     bool on_choose(int row)override {
-        if(row==(blur_supported?2:3)){overlay(0);return true;}
+        if(row==((blur_supported&&!scan_supported)?2:3)){overlay(0);return true;}
         on_adjust(row,1);redraw=true;return false;
     }
     bool on_tick(std::uint32_t now)override {
@@ -59,5 +60,5 @@ void ui16_crt_new_session(){settings={};send_settings();}
 void ui16_crt_accept_status(std::uint32_t applied) {
     taskENTER_CRITICAL();applied_status=applied;status_seen=true;taskEXIT_CRITICAL();
 }
-Menu *ui16_create_crt_menu(bool horizontal_blur){return new CrtMenu(horizontal_blur);}
+Menu *ui16_create_crt_menu(bool horizontal_blur,bool scanline){return new CrtMenu(horizontal_blur,scanline);}
 #endif

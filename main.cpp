@@ -60,7 +60,7 @@ int option_osd_key = OPTION_OSD_KEY_SELECT_RIGHT;
 int16_t active_core = -1;           // firmware detected this core as active
 bool core_running;                  // a ROM is loaded and running on the core
 #ifdef UI16_SYSTEM_MENU
-static volatile bool osd_config_ready=false,osd_config_capable=false,crt_stage1_capable=false,crt_blur_capable=false;
+static volatile bool osd_config_ready=false,osd_config_capable=false,crt_stage1_capable=false,crt_blur_capable=false,crt_scanline_capable=false;
 static Ui16GameOsd game_osd_owner=Ui16GameOsd::System;
 #endif
 struct core_info *core;
@@ -365,7 +365,7 @@ static void uart1_rx_task(void *pvParameters)
 #ifdef UI16_SYSTEM_MENU
     char osd_tag[7]={};
     unsigned osd_tag_count=0;
-    bool osd_tag_found=false,crt_tag_found=false,blur_tag_found=false;
+    bool osd_tag_found=false,crt_tag_found=false,blur_tag_found=false,scan_tag_found=false;
 #endif
     while (1) {
         uint8_t ch=0;
@@ -406,14 +406,15 @@ static void uart1_rx_task(void *pvParameters)
                 pos = 0;
             } else if (type == 2) {                 // config string / OSD feature marker
 #ifdef UI16_SYSTEM_MENU
-                if(pos==4){osd_tag_count=0;osd_tag_found=false;crt_tag_found=false;blur_tag_found=false;}
+                if(pos==4){osd_tag_count=0;osd_tag_found=false;crt_tag_found=false;blur_tag_found=false;scan_tag_found=false;}
                 for(unsigned i=0;i<6;++i)osd_tag[i]=osd_tag[i+1];
                 osd_tag[6]=static_cast<char>(ch);
                 if(++osd_tag_count>=7&&memcmp(osd_tag,"OSDWIN1",7)==0)osd_tag_found=true;
                 if(osd_tag_count>=7&&memcmp(osd_tag,"CRTSTG1",7)==0)crt_tag_found=true;
                 if(osd_tag_count>=7&&memcmp(osd_tag,"CRTBLR1",7)==0)blur_tag_found=true;
+                if(osd_tag_count>=7&&memcmp(osd_tag,"CRTSCN1",7)==0)scan_tag_found=true;
                 if(pos==len+2){
-                    taskENTER_CRITICAL();crt_blur_capable=osd_tag_found&&crt_tag_found&&blur_tag_found;osd_config_capable=osd_tag_found;crt_stage1_capable=osd_tag_found&&crt_tag_found;osd_config_ready=true;taskEXIT_CRITICAL();
+                    taskENTER_CRITICAL();crt_blur_capable=osd_tag_found&&crt_tag_found&&blur_tag_found;crt_scanline_capable=crt_blur_capable&&scan_tag_found;osd_config_capable=osd_tag_found;crt_stage1_capable=osd_tag_found&&crt_tag_found;osd_config_ready=true;taskEXIT_CRITICAL();
                 }
 #endif
                 if(pos==len+2)pos=0;else ++pos;
@@ -495,7 +496,7 @@ static void uart1_rx_task(void *pvParameters)
 #ifdef UI16_SYSTEM_MENU
 static bool ui16_hw_osd_ready(void *)
 {
-    taskENTER_CRITICAL();osd_config_ready=false;osd_config_capable=false;crt_stage1_capable=false;crt_blur_capable=false;taskEXIT_CRITICAL();
+    taskENTER_CRITICAL();osd_config_ready=false;osd_config_capable=false;crt_stage1_capable=false;crt_blur_capable=false;crt_scanline_capable=false;taskEXIT_CRITICAL();
     fpga_tx_header(2,1);
     const auto start=bflb_mtimer_get_time_ms();
     while(!osd_config_ready&&bflb_mtimer_get_time_ms()-start<400)delay(10);
@@ -700,7 +701,7 @@ static void main_task(void *pvParameters)
                         ui16_wait_release();overlay_osd_window(0,0,0,0);overlay(1);
                         menu_clear();
                         const std::string root=std::string(drv)+target->rom_dir;
-                        std::unique_ptr<Menu> popup(game_osd_owner==Ui16GameOsd::Crt?ui16_create_crt_menu(crt_blur_capable):
+                        std::unique_ptr<Menu> popup(game_osd_owner==Ui16GameOsd::Crt?ui16_create_crt_menu(crt_blur_capable,crt_scanline_capable):
                             target->create_menu?target->create_menu(root.c_str()):create_default_menu(root.c_str()));
                         Menu *menu=popup.get();push_menu(std::move(popup));
                         menu->do_redraw();ui16_osd_menu_input_loop(game_osd_owner!=Ui16GameOsd::Crt,

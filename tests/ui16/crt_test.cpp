@@ -79,5 +79,21 @@ int main(){
     assert(std::string(blur_cells.data()+7*32,32).find("FRAME ACK")!=std::string::npos);
     assert(blur_menu->on_choose(2)&&!overlay_on());
     ui16_crt_new_session();assert(config==preserved);
+    std::unique_ptr<Menu> scan_menu(ui16_create_crt_menu(true,true));
+    assert((scan_menu->get_options()==std::vector<int>{3,4,5,9}));
+    assert(scan_menu->on_adjust(0,1));assert(scan_menu->on_adjust(1,1));
+    for(unsigned level=1;level<=4;level++){
+        assert(scan_menu->on_adjust(2,1));
+        assert(config==(preserved|0x30000|((level%4)<<19)));
+    }
+    assert(scan_menu->on_adjust(2,-1));assert(config==(preserved|0x1b0000));
+    ui16_crt_accept_status(config);assert(scan_menu->on_tick(30));
+    ui16_osd_capture_begin();scan_menu->render();ui16_osd_capture_end();
+    const auto &scan_cells=ui16_osd_canvas().cells;
+    assert(std::string(scan_cells.data(),32).find("CRT READY - STAGE4B")!=std::string::npos);
+    assert(std::string(scan_cells.data()+5*32,32).find("STRONG")!=std::string::npos);
+    assert(std::string(scan_cells.data()+7*32,32).find("FRAME ACK")!=std::string::npos);
+    assert(scan_menu->on_choose(3)&&!overlay_on());
+    ui16_crt_new_session();assert(config==preserved);
     std::puts("CRT host PASS: independent hotkeys, conflict reservation, preserved config bits, frame acknowledgement, exclusive popup, fixed OSD1, session reset");
 }
