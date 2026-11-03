@@ -65,5 +65,19 @@ int main(){
     assert(!overlay_on());menu_clear();
     // New game clears only this stage's reserved bits; the session is not saved.
     ui16_crt_new_session();assert(config==preserved&&critical_depth==0);
+    // The effect-capable core advertises actual blur and omits scanline control.
+    std::unique_ptr<Menu> blur_menu(ui16_create_crt_menu(true));
+    assert((blur_menu->get_options()==std::vector<int>{3,4,9}));
+    assert(blur_menu->on_adjust(0,1));assert(config==(preserved|0x10000));
+    assert(blur_menu->on_adjust(1,1));assert(config==(preserved|0x30000));
+    assert(!blur_menu->on_adjust(2,1));assert(config==(preserved|0x30000));
+    ui16_crt_accept_status(config);assert(blur_menu->on_tick(20));
+    ui16_osd_capture_begin();blur_menu->render();ui16_osd_capture_end();
+    const auto &blur_cells=ui16_osd_canvas().cells;
+    assert(std::string(blur_cells.data(),32).find("H BLUR READY")!=std::string::npos);
+    assert(std::string(blur_cells.data()+5*32,32).find("NOT YET")!=std::string::npos);
+    assert(std::string(blur_cells.data()+7*32,32).find("FRAME ACK")!=std::string::npos);
+    assert(blur_menu->on_choose(2)&&!overlay_on());
+    ui16_crt_new_session();assert(config==preserved);
     std::puts("CRT host PASS: independent hotkeys, conflict reservation, preserved config bits, frame acknowledgement, exclusive popup, fixed OSD1, session reset");
 }

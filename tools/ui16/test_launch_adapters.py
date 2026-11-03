@@ -174,6 +174,7 @@ bool ui16_hw_osd_ready(void *);
 bool ui16_hw_starting(void *);
 void overlay_osd_window(unsigned,unsigned,unsigned,unsigned);
 extern bool crt_stage1_capable;
+static bool crt_blur_capable=false;
 extern Ui16GameOsd game_osd_owner;
 void delay(unsigned);
 void get_joypad_states(uint16_t *,uint16_t *,uint16_t *,uint16_t *);
