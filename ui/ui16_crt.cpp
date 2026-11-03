@@ -5,6 +5,7 @@
 
 namespace {
 Ui16CrtSettings settings;
+bool initial_from_csv=false;
 volatile std::uint32_t applied_status=0;
 volatile bool status_seen=false;
 std::uint32_t last_send_ms=0;
@@ -24,8 +25,9 @@ struct CrtMenu:Menu {
     bool matched=false;
     int osd_width()const override{return 23;}
     void render()override {
-        overlay_clear();overlay_cursor(0,0);overlay_printf("%s",scan_supported?"CRT CSV CHECK - STAGE5A":blur_supported?"H BLUR READY - STAGE4A":"BYPASS ONLY - STAGE 1");
+        overlay_clear();overlay_cursor(0,0);overlay_printf("%s",scan_supported?"CRT PRESET - STAGE5B":blur_supported?"H BLUR READY - STAGE4A":"BYPASS ONLY - STAGE 1");
         overlay_cursor(0,1);overlay_printf("SESSION ONLY / NO SAVE");
+        overlay_cursor(0,2);overlay_printf("INITIAL: %s",initial_from_csv?"CSV":"DEFAULT");
         overlay_cursor(0,3);overlay_printf("%s %s",blur_supported?"CRT ENABLE  ":"CRT REQUEST ",settings.enabled?"ON":"OFF");
         overlay_cursor(0,4);overlay_printf("%s %s",blur_supported?"H BLUR      ":"H BLUR REQ  ",strength(settings.blur));
         overlay_cursor(0,5);if(scan_supported)overlay_printf("SCANLINE     %s",strength(settings.scanline));
@@ -62,7 +64,11 @@ struct CrtMenu:Menu {
     }
 };
 }
-void ui16_crt_new_session(){settings={};send_settings();}
+void ui16_crt_new_session(const Ui16CrtRecommendation &recommended){
+    initial_from_csv=recommended.present&&recommended.settings.blur<=3&&recommended.settings.scanline<=3;
+    settings=initial_from_csv?recommended.settings:Ui16CrtSettings{};
+    send_settings();
+}
 void ui16_crt_accept_status(std::uint32_t applied) {
     taskENTER_CRITICAL();applied_status=applied;status_seen=true;taskEXIT_CRITICAL();
 }

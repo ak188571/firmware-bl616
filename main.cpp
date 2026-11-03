@@ -695,7 +695,7 @@ static void main_task(void *pvParameters)
                 if(error==Ui16LaunchError::None){
                     // Preserve normal game input; the UI button assignment is not a game remap.
                     ui16_wait_release();
-                    if(crt_stage1_capable)ui16_crt_new_session();
+                    if(crt_stage1_capable)ui16_crt_new_session(request.crt_recommendation);
                     for(;;){
                         overlay(0);send_hid_to_core();
                         ui16_wait_release();overlay_osd_window(0,0,0,0);overlay(1);

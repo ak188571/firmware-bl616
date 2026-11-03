@@ -91,7 +91,7 @@ int main(){
     ui16_crt_accept_status(config);assert(scan_menu->on_tick(30));
     ui16_osd_capture_begin();scan_menu->render();ui16_osd_capture_end();
     const auto &scan_cells=ui16_osd_canvas().cells;
- assert(std::string(scan_cells.data(),32).find("CRT CSV CHECK - STAGE5A")!=std::string::npos);
+    assert(std::string(scan_cells.data(),32).find("CRT PRESET - STAGE5B")!=std::string::npos);
     assert(std::string(scan_cells.data()+5*32,32).find("STRONG")!=std::string::npos);
     assert(std::string(scan_cells.data()+7*32,32).find("FRAME ACK")!=std::string::npos);
     assert(scan_menu->on_choose(3)&&!overlay_on());
@@ -111,5 +111,31 @@ int main(){
     ui16_crt_accept_status(desired);now=2000;assert(!retry_menu->on_tick(now));
     assert(config_sends==sent+3&&config==newer);
     ui16_crt_accept_status(newer);now=2010;assert(retry_menu->on_tick(now));
-    std::puts("CRT host PASS: independent hotkeys, config preservation, frame acknowledgement, lost-transfer recovery, stale status rejection, session reset");
+    // CSV values seed only a new session; opening/closing a menu must not reset edits.
+    const Ui16CrtRecommendation recommended{true,{true,1,2}};
+    now=3000;const auto before_preset=config_sends;
+    ui16_crt_new_session(recommended);
+    assert(config_sends==before_preset+1&&config==recommended.settings.merge(preserved));
+    std::unique_ptr<Menu> preset_menu(ui16_create_crt_menu(true,true));
+    assert(!preset_menu->on_tick(3001)); // A previous game's ACK must be cleared.
+    ui16_osd_capture_begin();preset_menu->render();ui16_osd_capture_end();
+    assert(std::string(ui16_osd_canvas().cells.data()+2*32,32).find("INITIAL: CSV")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+7*32,32).find("WAITING")!=std::string::npos);
+    ui16_crt_accept_status(config);assert(preset_menu->on_tick(3010));
+    assert(preset_menu->on_adjust(1,1));const auto edited=config;
+    assert(preset_menu->on_choose(3));
+    preset_menu.reset(ui16_create_crt_menu(true,true));
+    assert(config==edited); // The initial preset is not reapplied on menu creation.
+    ui16_crt_new_session();assert(config==preserved); // A different game with no CSV is OFF.
+    ui16_osd_capture_begin();preset_menu->render();ui16_osd_capture_end();
+    assert(std::string(ui16_osd_canvas().cells.data()+2*32,32).find("INITIAL: DEFAULT")!=std::string::npos);
+    ui16_crt_new_session({false,{true,3,3}});assert(config==preserved);
+    ui16_crt_new_session({true,{true,4,2}});assert(config==preserved);
+    ui16_crt_new_session({true,{true,1,4}});assert(config==preserved);
+    ui16_crt_new_session({true,{false,0,0}});assert(config==preserved);
+    ui16_osd_capture_begin();preset_menu->render();ui16_osd_capture_end();
+    assert(std::string(ui16_osd_canvas().cells.data()+2*32,32).find("INITIAL: CSV")!=std::string::npos);
+    ui16_crt_new_session(recommended);assert(config==recommended.settings.merge(preserved));
+    assert(critical_depth==0);
+    std::puts("CRT host PASS: hotkeys, preserved config, frame ACK/retry, stale ACK rejection, CSV/default/explicit OFF seeds, invalid seed fallback, same-game edits and per-launch reset");
 }

@@ -23,5 +23,5 @@ inline Ui16GameOsd ui16_osd_request(std::uint16_t direct,std::uint16_t hid) {
 
 struct Menu;
 Menu *ui16_create_crt_menu(bool horizontal_blur=false,bool scanline=false);
-void ui16_crt_new_session();
+void ui16_crt_new_session(const Ui16CrtRecommendation &recommended={});
 void ui16_crt_accept_status(std::uint32_t applied);

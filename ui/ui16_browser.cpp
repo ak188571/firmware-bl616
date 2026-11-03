@@ -105,7 +105,9 @@ bool Ui16Browser::update(std::uint16_t buttons, std::uint32_t now_ms,
             const auto *entry=active_system();
             if(entry&&ui16_valid_component(games_.names[selected])&&ui16_is_rom_file(entry->id,games_.names[selected].c_str())){
                 games_.launch_error=nullptr;
-                pending_launch_={entry->id,relative_path_,games_.names[selected]};
+                const auto recommendation=!games_.titles_error&&games_.crt_recommendations.size()==games_.names.size()
+                    ? games_.crt_recommendations[selected] : Ui16CrtRecommendation{};
+                pending_launch_={entry->id,relative_path_,games_.names[selected],recommendation};
                 return false; // Confirmation wins over a simultaneous direction.
             }
         }

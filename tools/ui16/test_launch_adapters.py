@@ -6,6 +6,8 @@ ROOT=Path(__file__).resolve().parents[2]
 source=(ROOT/'main.cpp').read_text(encoding='utf-8')
 adapters=source.split('// UI16 launch adapters BEGIN',1)[1].split('\n',1)[1].split('// UI16 launch adapters END',1)[0]
 hid=source[source.index('static void send_hid_to_core(void)'):source.index('// // (R L X A RT LT DN UP START SELECT Y B)')]
+start=source.index('                const auto error=runtime.launch(')
+handoff=source[start:source.index('                    for(;;){',start)]+'                }\n'
 build=ROOT/'build-ui16-host';build.mkdir(exist_ok=True)
 code=r'''
 #include <cstdint>
@@ -14,6 +16,7 @@ code=r'''
 #include <cassert>
 #include <cstdio>
 #include "ui16_crt.h"
+#include "ui16_launch.h"
 static bool crt_stage1_capable=false;
 static Ui16GameOsd game_osd_owner=Ui16GameOsd::System;
 using std::uint16_t;using std::uint64_t;
@@ -60,6 +63,19 @@ static std::vector<unsigned> bytes;
 void fpga_tx_header(int c,int n){assert(c==9&&n==5);}
 void fpga_tx_byte(unsigned char b){bytes.push_back(b);}
 '''+adapters+hid+r'''
+static unsigned session_calls=0,releases=0;
+static Ui16CrtRecommendation captured;
+void ui16_wait_release(){++releases;}
+void ui16_crt_new_session(const Ui16CrtRecommendation &value){++session_calls;captured=value;}
+struct FakeLaunch {
+ Ui16LaunchError result;
+ Ui16LaunchError launch(const char *,const Ui16LaunchTarget &,const Ui16LaunchRequest &){return result;}
+};
+void launch_handoff(Ui16LaunchError result,const Ui16LaunchRequest &request){
+ FakeLaunch runtime{result};const char *drv="sd:";Ui16LaunchTarget launch_target{1,"nes","nestang.bin"};
+'''+handoff+r'''
+}
+'''+r'''
 int main(){
  assert(ui16_hw_file_ready("sd:a.nes",nullptr));directory=true;assert(!ui16_hw_file_ready("x",nullptr));directory=false;
  file_result=1;assert(!ui16_hw_file_ready("x",nullptr));file_result=0;
@@ -92,6 +108,15 @@ int main(){
  assert(bytes.empty()&&game_osd_owner==Ui16GameOsd::System);
  index=0;bytes.clear();overlay(0);pads={{0xc4,0,0,0},{0,0,0,0},{0x44,0,0,0}};
  send_hid_to_core();assert(index==2&&neutral_calls==1&&bytes.size()==4&&game_osd_owner==Ui16GameOsd::Crt);
+ const Ui16LaunchRequest seeded{1,"","dr.nes",{true,{true,1,2}}};
+ crt_stage1_capable=true;
+ for(auto error:{Ui16LaunchError::ProgramFailed,Ui16LaunchError::CoreTimeout,Ui16LaunchError::RomFailed,Ui16LaunchError::MissingRom}){
+  launch_handoff(error,seeded);assert(session_calls==0&&releases==0);
+ }
+ crt_stage1_capable=false;launch_handoff(Ui16LaunchError::None,seeded);assert(session_calls==0&&releases==1);
+ crt_stage1_capable=true;launch_handoff(Ui16LaunchError::None,seeded);
+ assert(session_calls==1&&captured.present&&captured.settings==Ui16CrtSettings({true,1,2}));
+ launch_handoff(Ui16LaunchError::None,Ui16LaunchRequest{1,"","other.nes"});assert(session_calls==2&&!captured.present);
  std::puts("Actual main.cpp adapters passed: stat/program/ID timeout/load state, display ownership, unmodified X/Y game HID, OSD chord, neutral packets");
 }
 '''

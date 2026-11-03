@@ -1,10 +1,12 @@
 #pragma once
 #include <string>
+#include "ui16_crt_settings.h"
 
 struct Ui16LaunchRequest {
     int core_id=0;
     std::string relative_path;
     std::string filename; // Original filename, never the translated display title.
+    Ui16CrtRecommendation crt_recommendation{}; // Snapshot for this confirmed ROM.
 };
 
 struct Ui16LaunchTarget {
