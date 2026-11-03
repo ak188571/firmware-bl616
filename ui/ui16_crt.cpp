@@ -24,7 +24,7 @@ struct CrtMenu:Menu {
     bool matched=false;
     int osd_width()const override{return 23;}
     void render()override {
-        overlay_clear();overlay_cursor(0,0);overlay_printf("%s",scan_supported?"CRT READY - STAGE4B":blur_supported?"H BLUR READY - STAGE4A":"BYPASS ONLY - STAGE 1");
+        overlay_clear();overlay_cursor(0,0);overlay_printf("%s",scan_supported?"CRT CSV CHECK - STAGE5A":blur_supported?"H BLUR READY - STAGE4A":"BYPASS ONLY - STAGE 1");
         overlay_cursor(0,1);overlay_printf("SESSION ONLY / NO SAVE");
         overlay_cursor(0,3);overlay_printf("%s %s",blur_supported?"CRT ENABLE  ":"CRT REQUEST ",settings.enabled?"ON":"OFF");
         overlay_cursor(0,4);overlay_printf("%s %s",blur_supported?"H BLUR      ":"H BLUR REQ  ",strength(settings.blur));

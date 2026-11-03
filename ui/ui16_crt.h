@@ -19,14 +19,7 @@ inline Ui16GameOsd ui16_osd_request(std::uint16_t direct,std::uint16_t hid) {
                     (hid&UI16_OSD2_KEY)==UI16_OSD2_KEY;
     return right==left?Ui16GameOsd::None:right?Ui16GameOsd::System:Ui16GameOsd::Crt;
 }
-struct Ui16CrtSettings {
-    bool enabled=false;
-    unsigned blur=0,scanline=0;
-    std::uint32_t merge(std::uint32_t config) const {
-        return (config&~UI16_CRT_MASK)|(std::uint32_t(enabled)<<16)|
-               ((blur&3u)<<17)|((scanline&3u)<<19);
-    }
-};
+#include "ui16_crt_settings.h"
 
 struct Menu;
 Menu *ui16_create_crt_menu(bool horizontal_blur=false,bool scanline=false);

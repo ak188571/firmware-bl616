@@ -91,7 +91,7 @@ int main(){
     ui16_crt_accept_status(config);assert(scan_menu->on_tick(30));
     ui16_osd_capture_begin();scan_menu->render();ui16_osd_capture_end();
     const auto &scan_cells=ui16_osd_canvas().cells;
-    assert(std::string(scan_cells.data(),32).find("CRT READY - STAGE4B")!=std::string::npos);
+ assert(std::string(scan_cells.data(),32).find("CRT CSV CHECK - STAGE5A")!=std::string::npos);
     assert(std::string(scan_cells.data()+5*32,32).find("STRONG")!=std::string::npos);
     assert(std::string(scan_cells.data()+7*32,32).find("FRAME ACK")!=std::string::npos);
     assert(scan_menu->on_choose(3)&&!overlay_on());
