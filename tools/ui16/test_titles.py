@@ -7,6 +7,20 @@ import build_font
 ROOT=Path(__file__).resolve().parents[2]
 
 class TitlesTests(unittest.TestCase):
+    def test_crt_extension_and_font_compatibility(self):
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'titles.csv'
+            path.write_text('name\ttitle\tcrt_v1\na.nes\t日本\t1:2:3\nb.nes\t\t\n',encoding='utf-8')
+            self.assertEqual(read_titles(path),[(2,'a.nes','日本'),(3,'b.nes','')])
+            self.assertEqual(read_titles(path,include_crt=True)[0],(2,'a.nes','日本','1:2:3'))
+            for field in ('2:0:0','1:4:0','1:0:4','1:0','1:0:0:0',' 1:0:0','1:0:0 '):
+                path.write_text('name\ttitle\tcrt_v1\na.nes\t日本\t'+field+'\n',encoding='utf-8')
+                with self.assertRaises(ValueError):read_titles(path)
+            (Path(d)/'a.nes').mkdir()
+            path.write_text('name\ttitle\tcrt_v1\na.nes\t日本\t1:1:1\n',encoding='utf-8')
+            result=subprocess.run([sys.executable,str(Path(__file__).with_name('check_titles.py')),str(path),'--core','nes'],capture_output=True,text=True,encoding='utf-8')
+            self.assertNotEqual(result.returncode,0);self.assertIn('folders cannot have CRT',result.stdout)
+
     def test_formats_and_checker(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d);tsv=root/'titles.csv';(root/'game001.nes').write_bytes(b'')
@@ -38,7 +52,7 @@ class TitlesTests(unittest.TestCase):
             bank=json.loads(gzip.decompress((Path(__file__).with_name('shinonome16.json.gz')).read_bytes()))
             known={e['cp'] for e in json.loads((fw/'ui/ui16_font_manifest.json').read_text(encoding='utf-8'))['glyphs']}
             extra=next(chr(int(cp)) for cp in sorted(bank,key=int) if int(cp)>=0x4e00 and int(cp) not in known)
-            tsv.write_text('name\ttitle\na.nes\t'+extra+'\n',encoding='utf-8')
+            tsv.write_text('name\ttitle\tcrt_v1\na.nes\t'+extra+'\t1:2:3\n',encoding='utf-8')
             original=json.loads((fw/'ui/ui16_font_manifest.json').read_text(encoding='utf-8'));old_root=build_font.ROOT;old_argv=sys.argv
             try:
                 build_font.ROOT=fw

@@ -18,6 +18,7 @@ struct Menu {
     virtual int osd_width() const {return 0;}
     virtual bool fullscreen_dialog(int) const {return false;}
     virtual bool inline_choice(int) const {return false;}
+    virtual bool on_close() {return true;} // May keep the popup open to show a save failure.
     virtual void render() = 0;
     virtual std::vector<int> get_options() = 0;   // return list of choice rows
     virtual bool on_choose(int idx) = 0;          // called when a choice is selected

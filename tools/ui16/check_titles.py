@@ -42,12 +42,13 @@ def main():
                 entries[key]=f
         if len(entries)>256:report('WARN',f'{directory}: {len(entries)} entries; device list limit is 256 (split into subfolders)')
         if not path.is_file() and (directory/'titles.tsv').exists():report('ERROR',f'{directory}: migrate legacy titles.tsv to titles.csv (name<TAB>title)')
-        try:rows=read_titles(path) if path.is_file() else []
+        try:rows=read_titles(path,include_crt=True) if path.is_file() else []
         except ValueError as e:report('ERROR',str(e));continue
         mapped=set();used_titles=set()
-        for line,name,title in rows:
+        for line,name,title,crt in rows:
             label=f'{path}:{line}';entry=entries.get(name.lower())
             if entry is None:report('ERROR',f'{label}: file/folder missing, hidden or wrong ROM extension: {name}')
+            if crt and entry and entry.is_dir():report('ERROR',f'{label}: folders cannot have CRT recommendations')
             mapped.add(name.lower())
             if not title.strip(' \u3000'):title=name;report('WARN',f'{label}: blank title; original name will be used')
             elif title!=title.strip(' \u3000'):report('WARN',f'{label}: leading/trailing title spaces')

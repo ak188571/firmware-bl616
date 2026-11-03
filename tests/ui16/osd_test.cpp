@@ -49,6 +49,10 @@ struct InlineMenu:FutureMenu{
     bool inline_choice(int i)const override{return i==0;}
     bool on_choose(int i)override{if(i==0){on_adjust(0,1);redraw=true;}return false;}
 };
+struct CloseVetoMenu:FutureMenu{
+    int attempts=0;
+    bool on_close()override{return ++attempts==2;}
+};
 struct VariableMenu:FutureMenu{
     void render()override{
         overlay_clear();overlay_cursor(0,10);overlay_printf("FILTER %s",value?"OFF":"STANDARD");
@@ -122,5 +126,9 @@ int main(){
     const auto inline_frame=ui16_osd_layout(ui16_osd_canvas(),{10,11},0,top,width,Ui16OsdPosition::TopRight);
     assert(boxes.size()==1&&clears==0);check_screen(snapshots[1],inline_frame);
     check_screen(snapshots[2],inline_frame);
-    menu_clear();std::puts("OSD host tests passed: dimensions, five anchors, in-place updates, held confirm rendering, no hide/clear, dialog recovery, Main Menu/resume");
+    // Failed save can veto X/Y; holding the button must not bypass the veto.
+    menu_clear();auto veto=std::make_unique<CloseVetoMenu>();auto *veto_ptr=veto.get();push_menu(std::move(veto));reset_output();
+    pads={{0x200},{0x200},{0},{0x200}};ui16_osd_menu_input_loop();
+    assert(veto_ptr->attempts==2&&at==4&&!overlay_on());
+    menu_clear();std::puts("OSD host tests passed: dimensions, five anchors, in-place updates, held confirm rendering, close veto, no hide/clear, dialog recovery, Main Menu/resume");
 }

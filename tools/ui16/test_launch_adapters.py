@@ -15,6 +15,10 @@ code=r'''
 #include <cstdio>
 #include "ui16_crt.h"
 static bool crt_stage1_capable=false;
+static unsigned crt_prepares=0,crt_ends=0;
+static std::string crt_path;
+void ui16_crt_prepare_game(int id,const char *path){assert(id==1);++crt_prepares;crt_path=path;}
+void ui16_crt_end_session(){++crt_ends;}
 static Ui16GameOsd game_osd_owner=Ui16GameOsd::System;
 using std::uint16_t;using std::uint64_t;
 struct FILINFO {unsigned char fattrib=0;unsigned fsize=100;};
@@ -72,6 +76,10 @@ int main(){
  result=1;assert(!ui16_hw_load_rom(1,"x",nullptr)&&!core_running);
  result=0;started=false;assert(!ui16_hw_load_rom(1,"x",nullptr)); // Includes SNES invalid-header return-0 case.
  assert(!ui16_hw_load_rom(999,"x",nullptr));
+ crt_stage1_capable=true;started=true;result=0;
+ assert(ui16_hw_load_rom(1,"sd:nes/test.nes",nullptr)&&crt_prepares==1&&crt_path=="sd:nes/test.nes");
+ result=1;const auto ends=crt_ends;assert(!ui16_hw_load_rom(1,"sd:nes/test.nes",nullptr)&&crt_ends==ends+1);
+ result=0;crt_stage1_capable=false;
  ui16_hw_display_owner(true,nullptr);assert(owner&&overlay_on());
  ui16_hw_display_owner(false,nullptr);assert(!owner&&overlay_on());
  const auto before_notice=now;

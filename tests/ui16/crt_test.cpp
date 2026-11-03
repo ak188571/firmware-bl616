@@ -2,6 +2,7 @@
 #include "ui16_osd.h"
 #include "ui16_osd_menu.h"
 #include "menu_manager.h"
+#include "crt_fake_fs.h"
 #include <cassert>
 #include <cstdarg>
 #include <cstdio>

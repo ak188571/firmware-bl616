@@ -541,8 +541,9 @@ static bool ui16_hw_load_rom(int id,const char *path,void *)
     auto *target=find_core_by_id(id);
     core_running=false;
     if(!target||!target->load_rom)return false;
+    if(crt_stage1_capable)ui16_crt_prepare_game(id,path);
     const int result=target->load_rom(path);
-    if(result!=0||!core_running){core_running=false;return false;}
+    if(result!=0||!core_running){core_running=false;ui16_crt_end_session();return false;}
     overlay(0);return true;
 }
 static void ui16_hw_display_owner(bool ui16,void *)
@@ -713,6 +714,7 @@ static void main_task(void *pvParameters)
                     }
                     menu_clear();
                 }
+                ui16_crt_end_session();
                 ui16_restore_menu(runtime,browser);
 #ifdef UI16_SD_FONT
                 // FPGA reprogramming restores the initial embedded font ROM.
