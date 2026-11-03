@@ -13,13 +13,14 @@ static std::uint32_t config=0xa5e01234;
 static std::uint64_t now=0;
 static std::vector<std::uint16_t> pads;
 static unsigned at=0;
+static unsigned config_sends=0;
 static std::vector<std::array<unsigned,4>> boxes;
 int _overlay_on=1,critical_depth=0;
 void enter_critical(){++critical_depth;}void leave_critical(){--critical_depth;}
 void fpga_tx_header(int c,int n){assert(c==0x12&&n==1);}
 void fpga_tx_byte(std::uint8_t){}
 std::uint32_t get_core_config(){return config;}
-void set_core_config(std::uint32_t v){config=v;}
+void set_core_config(std::uint32_t v){config=v;++config_sends;}
 std::uint64_t bflb_mtimer_get_time_ms(){return now;}
 void delay(unsigned ms){now+=ms;}
 void get_joypad_states(std::uint16_t *a,std::uint16_t *b,std::uint16_t *c,std::uint16_t *d){
@@ -95,5 +96,20 @@ int main(){
     assert(std::string(scan_cells.data()+7*32,32).find("FRAME ACK")!=std::string::npos);
     assert(scan_menu->on_choose(3)&&!overlay_on());
     ui16_crt_new_session();assert(config==preserved);
-    std::puts("CRT host PASS: independent hotkeys, conflict reservation, preserved config bits, frame acknowledgement, exclusive popup, fixed OSD1, session reset");
+    // A lost transfer must recover without another controller operation.
+    now=1000;ui16_crt_new_session();
+    std::unique_ptr<Menu> retry_menu(ui16_create_crt_menu(true,true));
+    assert(retry_menu->on_adjust(0,1));assert(retry_menu->on_adjust(1,1));
+    const auto desired=config;const unsigned sent=config_sends;
+    now=1100;retry_menu->on_tick(now);assert(config_sends==sent);
+    now=1300;retry_menu->on_tick(now);assert(config_sends==sent+1&&config==desired);
+    ui16_crt_accept_status(desired);now=1310;assert(retry_menu->on_tick(now));
+    now=1700;retry_menu->on_tick(now);assert(config_sends==sent+1);
+    assert(retry_menu->inline_choice(0)&&retry_menu->inline_choice(2)&&!retry_menu->inline_choice(3));
+    // An old status reply must not acknowledge a newer setting.
+    assert(retry_menu->on_adjust(2,1));const auto newer=config;
+    ui16_crt_accept_status(desired);now=2000;assert(!retry_menu->on_tick(now));
+    assert(config_sends==sent+3&&config==newer);
+    ui16_crt_accept_status(newer);now=2010;assert(retry_menu->on_tick(now));
+    std::puts("CRT host PASS: independent hotkeys, config preservation, frame acknowledgement, lost-transfer recovery, stale status rejection, session reset");
 }

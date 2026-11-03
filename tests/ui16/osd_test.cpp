@@ -45,6 +45,10 @@ struct FutureMenu:Menu{
 struct DialogMenu:FutureMenu{
     bool on_choose(int i)override{if(i==0)hardware.fill('!');return false;}
 };
+struct InlineMenu:FutureMenu{
+    bool inline_choice(int i)const override{return i==0;}
+    bool on_choose(int i)override{if(i==0){on_adjust(0,1);redraw=true;}return false;}
+};
 struct VariableMenu:FutureMenu{
     void render()override{
         overlay_clear();overlay_cursor(0,10);overlay_printf("FILTER %s",value?"OFF":"STANDARD");
@@ -111,5 +115,12 @@ int main(){
     assert(clears==0&&writes==2*selected0.width*selected0.height);
     check_screen(snapshots[2],selected0);
     for(auto b:boxes)assert(b[2]&&b[3]);
-    menu_clear();std::puts("OSD host tests passed: dynamic dimensions, five anchors, stable width, scrolling, in-place selection/value changes, no hide/clear, dialog cache recovery, Main Menu/resume");
+    // A held confirm button must not block in-place rendering or tick polling.
+    menu_clear();push_menu(std::make_unique<InlineMenu>());reset_output();
+    pads={{1},{1},{1},{0},{0x200}};ui16_osd_menu_input_loop();
+    top=0;width=20;
+    const auto inline_frame=ui16_osd_layout(ui16_osd_canvas(),{10,11},0,top,width,Ui16OsdPosition::TopRight);
+    assert(boxes.size()==1&&clears==0);check_screen(snapshots[1],inline_frame);
+    check_screen(snapshots[2],inline_frame);
+    menu_clear();std::puts("OSD host tests passed: dimensions, five anchors, in-place updates, held confirm rendering, no hide/clear, dialog recovery, Main Menu/resume");
 }

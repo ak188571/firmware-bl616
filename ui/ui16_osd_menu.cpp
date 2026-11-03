@@ -78,16 +78,20 @@ void ui16_osd_menu_input_loop(bool fixed_center,const char *title,bool dual_osd)
             }else if(menu->on_adjust(nav.selected(),delta))dirty=true;
         }
         if(!conflict&&(pressed&UI16_BUTTON_CONFIRM)&&nav.selected()<static_cast<int>(options.size())){
+            const bool inline_change=menu->inline_choice(nav.selected());
             const bool full=menu->fullscreen_dialog(nav.selected());
             if(full)overlay_osd_window(0,0,32,28);
             const bool close=menu->on_choose(nav.selected());
             // A dialog or another direct writer may have changed character RAM.
-            displayed_valid=false;
+            if(!inline_change)displayed_valid=false;
             if(close&&menu_is_active()&&menu_current()==menu)pop_menu();
             if(!menu_is_active())return;
             // Do not carry a button held in a child dialog to this popup.
-            do{get_joypad_states(&j1,&j2,&h1,&h2);if(j1|j2|h1|h2)delay(10);}while(j1|j2|h1|h2);
-            previous=0;dirty=true;
+            if(!inline_change){
+                do{get_joypad_states(&j1,&j2,&h1,&h2);if(j1|j2|h1|h2)delay(10);}while(j1|j2|h1|h2);
+                previous=0;
+            }
+            dirty=true;
         }
         delay(10);
     }

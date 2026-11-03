@@ -7,7 +7,9 @@ namespace {
 Ui16CrtSettings settings;
 volatile std::uint32_t applied_status=0;
 volatile bool status_seen=false;
+std::uint32_t last_send_ms=0;
 void send_settings() {
+    last_send_ms=static_cast<std::uint32_t>(bflb_mtimer_get_time_ms());
     taskENTER_CRITICAL();status_seen=false;taskEXIT_CRITICAL();
     set_core_config(settings.merge(get_core_config()));
 }
@@ -44,11 +46,15 @@ struct CrtMenu:Menu {
         if(row==((blur_supported&&!scan_supported)?2:3)){overlay(0);return true;}
         on_adjust(row,1);redraw=true;return false;
     }
+    bool inline_choice(int row)const override{return row<((blur_supported&&!scan_supported)?2:3);}
     bool on_tick(std::uint32_t now)override {
         bool seen;std::uint32_t value;
         taskENTER_CRITICAL();seen=status_seen;value=applied_status;taskEXIT_CRITICAL();
         const bool next=seen&&((value^settings.merge(0))&UI16_CRT_MASK)==0;
         const bool changed=next!=matched;matched=next;
+        // Recover a lost setting packet instead of waiting indefinitely for a
+        // value that was never received. Requests are idempotent and coalesce.
+        if(!matched && static_cast<std::uint32_t>(now-last_send_ms)>=250)send_settings();
         if(static_cast<std::uint32_t>(now-last_poll)>=100){
             taskENTER_CRITICAL();fpga_tx_header(0x12,1);taskEXIT_CRITICAL();last_poll=now;
         }
