@@ -42,6 +42,7 @@ extern "C" {
 #include "ui16_launch.h"
 #include "ui16_osd_menu.h"
 #include "ui16_crt.h"
+#include "ui16_rom_id_reader.h"
 #ifdef UI16_SD_FONT
 #include "ui16_font_cache.h"
 #ifdef UI16_RELIABLE_FONT
@@ -506,6 +507,7 @@ static bool ui16_hw_osd_ready(void *)
 }
 
 // UI16 launch adapters BEGIN (host-tested with hardware substitutes)
+static Ui16RomIdentity crt_rom_identity;
 static bool ui16_hw_file_ready(const char *path,void *)
 {
     FILINFO info{};
@@ -518,6 +520,7 @@ static bool ui16_hw_find_core(const char *name,std::string &path,void *)
 static bool ui16_hw_program(const char *path,void *)
 {
     core_running=false;active_core=-1;
+    crt_rom_identity={};
     extern bool gba_bios_loaded,gba_missing_bios_warned;
     gba_bios_loaded=false;gba_missing_bios_warned=false;
     const bool ok=fpga_program(path);
@@ -540,9 +543,16 @@ static bool ui16_hw_load_rom(int id,const char *path,void *)
 {
     auto *target=find_core_by_id(id);
     core_running=false;
+    crt_rom_identity={};
     if(!target||!target->load_rom)return false;
+    if(crt_stage1_capable){
+        overlay_status("Reading ROM ID...");
+        // The JTAG phase has finished. Reuse the noncacheable loader resources
+        // sequentially; identify_rom closes the read-only file before load_rom.
+        crt_rom_identity=ui16_identify_rom(id,path,fcore,fbuf,BLOCK_SIZE,[](){delay(1);});
+    }
     const int result=target->load_rom(path);
-    if(result!=0||!core_running){core_running=false;return false;}
+    if(result!=0||!core_running){core_running=false;crt_rom_identity={};return false;}
     overlay(0);return true;
 }
 static void ui16_hw_display_owner(bool ui16,void *)
@@ -695,7 +705,7 @@ static void main_task(void *pvParameters)
                 if(error==Ui16LaunchError::None){
                     // Preserve normal game input; the UI button assignment is not a game remap.
                     ui16_wait_release();
-                    if(crt_stage1_capable)ui16_crt_new_session(request.crt_recommendation);
+                    if(crt_stage1_capable)ui16_crt_new_session(request.crt_recommendation,crt_rom_identity);
                     for(;;){
                         overlay(0);send_hid_to_core();
                         ui16_wait_release();overlay_osd_window(0,0,0,0);overlay(1);

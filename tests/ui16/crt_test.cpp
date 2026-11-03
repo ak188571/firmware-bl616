@@ -91,7 +91,7 @@ int main(){
     ui16_crt_accept_status(config);assert(scan_menu->on_tick(30));
     ui16_osd_capture_begin();scan_menu->render();ui16_osd_capture_end();
     const auto &scan_cells=ui16_osd_canvas().cells;
-    assert(std::string(scan_cells.data(),32).find("CRT PRESET - STAGE5B")!=std::string::npos);
+    assert(std::string(scan_cells.data(),32).find("CRT ROM ID - STAGE5C")!=std::string::npos);
     assert(std::string(scan_cells.data()+5*32,32).find("STRONG")!=std::string::npos);
     assert(std::string(scan_cells.data()+7*32,32).find("FRAME ACK")!=std::string::npos);
     assert(scan_menu->on_choose(3)&&!overlay_on());
@@ -136,6 +136,16 @@ int main(){
     ui16_osd_capture_begin();preset_menu->render();ui16_osd_capture_end();
     assert(std::string(ui16_osd_canvas().cells.data()+2*32,32).find("INITIAL: CSV")!=std::string::npos);
     ui16_crt_new_session(recommended);assert(config==recommended.settings.merge(preserved));
+    const Ui16RomIdentity rom_id{true,Ui16RomVolume::Sd,1,0xabcdef01,65552};
+    ui16_crt_new_session(recommended,rom_id);
+    ui16_osd_capture_begin();preset_menu->render();ui16_osd_capture_end();
+    assert(std::string(ui16_osd_canvas().cells.data()+8*32,32).find("ROM ID: abcdef01")!=std::string::npos);
+    assert(preset_menu->on_choose(3));preset_menu.reset(ui16_create_crt_menu(true,true));
+    ui16_osd_capture_begin();preset_menu->render();ui16_osd_capture_end();
+    assert(std::string(ui16_osd_canvas().cells.data()+8*32,32).find("abcdef01")!=std::string::npos);
+    ui16_crt_new_session(recommended);assert(config==recommended.settings.merge(preserved));
+    ui16_osd_capture_begin();preset_menu->render();ui16_osd_capture_end();
+    assert(std::string(ui16_osd_canvas().cells.data()+8*32,32).find("UNAVAILABLE")!=std::string::npos);
     assert(critical_depth==0);
     std::puts("CRT host PASS: hotkeys, preserved config, frame ACK/retry, stale ACK rejection, CSV/default/explicit OFF seeds, invalid seed fallback, same-game edits and per-launch reset");
 }

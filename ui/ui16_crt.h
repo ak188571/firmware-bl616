@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include "ui16_rom_id.h"
 
 enum class Ui16GameOsd { None, System, Crt };
 constexpr std::uint16_t UI16_OSD1_KEY=0x0084; // SELECT + RIGHT
@@ -23,5 +24,5 @@ inline Ui16GameOsd ui16_osd_request(std::uint16_t direct,std::uint16_t hid) {
 
 struct Menu;
 Menu *ui16_create_crt_menu(bool horizontal_blur=false,bool scanline=false);
-void ui16_crt_new_session(const Ui16CrtRecommendation &recommended={});
+void ui16_crt_new_session(const Ui16CrtRecommendation &recommended={},const Ui16RomIdentity &rom_id={});
 void ui16_crt_accept_status(std::uint32_t applied);

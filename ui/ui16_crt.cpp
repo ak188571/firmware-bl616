@@ -6,6 +6,7 @@
 namespace {
 Ui16CrtSettings settings;
 bool initial_from_csv=false;
+Ui16RomIdentity identity;
 volatile std::uint32_t applied_status=0;
 volatile bool status_seen=false;
 std::uint32_t last_send_ms=0;
@@ -25,7 +26,7 @@ struct CrtMenu:Menu {
     bool matched=false;
     int osd_width()const override{return 23;}
     void render()override {
-        overlay_clear();overlay_cursor(0,0);overlay_printf("%s",scan_supported?"CRT PRESET - STAGE5B":blur_supported?"H BLUR READY - STAGE4A":"BYPASS ONLY - STAGE 1");
+        overlay_clear();overlay_cursor(0,0);overlay_printf("%s",scan_supported?"CRT ROM ID - STAGE5C":blur_supported?"H BLUR READY - STAGE4A":"BYPASS ONLY - STAGE 1");
         overlay_cursor(0,1);overlay_printf("SESSION ONLY / NO SAVE");
         overlay_cursor(0,2);overlay_printf("INITIAL: %s",initial_from_csv?"CSV":"DEFAULT");
         overlay_cursor(0,3);overlay_printf("%s %s",blur_supported?"CRT ENABLE  ":"CRT REQUEST ",settings.enabled?"ON":"OFF");
@@ -34,6 +35,8 @@ struct CrtMenu:Menu {
         else if(blur_supported)overlay_printf("SCANLINE     NOT YET");
         else overlay_printf("SCANLINE REQ %s",strength(settings.scanline));
         overlay_cursor(0,7);overlay_printf("APPLY: %s",matched?"FRAME ACK":"WAITING");
+        overlay_cursor(0,8);if(identity.valid)overlay_printf("ROM ID: %08lx",static_cast<unsigned long>(identity.crc));
+        else overlay_printf("ROM ID: UNAVAILABLE");
         overlay_cursor(0,9);overlay_printf("CLOSE");
     }
     std::vector<int> get_options()override{if(blur_supported&&!scan_supported)return {3,4,9};return {3,4,5,9};}
@@ -64,7 +67,8 @@ struct CrtMenu:Menu {
     }
 };
 }
-void ui16_crt_new_session(const Ui16CrtRecommendation &recommended){
+void ui16_crt_new_session(const Ui16CrtRecommendation &recommended,const Ui16RomIdentity &rom_id){
+    identity=rom_id;
     initial_from_csv=recommended.present&&recommended.settings.blur<=3&&recommended.settings.scanline<=3;
     settings=initial_from_csv?recommended.settings:Ui16CrtSettings{};
     send_settings();
