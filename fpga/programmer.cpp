@@ -48,8 +48,12 @@ static int _curr_tms, _curr_tdi;
 static unsigned char _tms_buffer[JTAG_TMS_BUFFER_SIZE];
 static tapState_t _state;
 
-const int JTAG_RATE=5000000;						// 5Mhz jtag speed
-const int JTAG_DELAY=32;                			// 320Mhz / 5Mhz / 2 = 32 cycles
+// Conservative control/read clocks. The bulk MSB writer remains unchanged.
+// Explicit low/setup/high/hold avoids depending on XIP placement or GPIO RMW timing.
+const unsigned JTAG_CONTROL_RATE = 500000;
+static uint32_t verify_first_status, verify_status, verify_user, verify_id;
+static unsigned verify_attempts, poll_reads;
+static uint32_t poll_mask, poll_value, poll_status;
 
 // Tang Primer 25K
 #define IDCODE_GW5A_25 0x0001281b
@@ -65,48 +69,30 @@ const int JTAG_DELAY=32;                			// 320Mhz / 5Mhz / 2 = 32 cycles
 // ------------------------------------------------------------
 // Physical I/O functions
 // follow libgpiodJtagBitbang.cpp
-#define get_mcycle() (0)
-#define wait_mcycle(start, cycles) (0)
-// static inline uint32_t get_mcycle(void) {
-// 	uint32_t mcycle;
-// 	asm volatile("csrr %0, mcycle" : "=r"(mcycle));
-// 	return mcycle;
-// }
-// static inline uint32_t wait_mcycle(uint32_t start, uint32_t cycles) {
-//     uint32_t end = start + cycles;
-//     uint32_t now;
-//     while ((now = get_mcycle()) < end);
-//     return now;
-// }
-
 static int jtag_read_tdo() {
     return GPIO_PIN_JTAG_TDO_V();
 }
 
-static int jtag_writeTMS(const uint8_t *tms_buf, uint32_t len, bool flush_buffer, const uint8_t tdi) {
-	if (len == 0) // nothing -> stop
-		return len;
+// Sample the current shift bit after the falling edge has settled and before
+// the next rising edge advances the TAP/data register.
+static int jtag_clock(bool tms, bool tdi, bool read = false) {
+    GPIO_PIN_JTAG_TCK_L();
+    GPIO_PIN_JTAG_TMS_W(tms);
+    GPIO_PIN_JTAG_TDI_W(tdi);
+    bflb_mtimer_delay_us(1);
+    const int bit = read ? jtag_read_tdo() : 0;
+    GPIO_PIN_JTAG_TCK_H();
+    bflb_mtimer_delay_us(1);
+    return bit;
+}
 
-	// uint32_t start = get_mcycle();
-	for (uint32_t i = 0; i < len; i++) {
-		int tms = ((tms_buf[i >> 3] & (1 << (i & 7))) ? 1 : 0);
-
-        if (tms) GPIO_PIN_JTAG_TMS_H(); else GPIO_PIN_JTAG_TMS_L(); // send TMS
-        if (tdi) GPIO_PIN_JTAG_TDI_H(); else GPIO_PIN_JTAG_TDI_L();     // send TDI
-        GPIO_PIN_JTAG_TCK_L();                                      // low  TCK
-		// start = wait_mcycle(start, JTAG_DELAY);
-
-        if (tms) GPIO_PIN_JTAG_TMS_H(); else GPIO_PIN_JTAG_TMS_L(); // send TMS
-        if (tdi) GPIO_PIN_JTAG_TDI_H(); else GPIO_PIN_JTAG_TDI_L();     // send TDI
-        GPIO_PIN_JTAG_TCK_H();                                      // high TCK
-
-        _curr_tms = tms;
-		// start = wait_mcycle(start, JTAG_DELAY);
-	}
-    // GPIO_PIN_JTAG_TCK_L();                                          // low  TCK
-	_curr_tdi = tdi;
-
-	return len;
+static int jtag_writeTMS(const uint8_t *buf, uint32_t len, bool, const uint8_t tdi) {
+    for (uint32_t i = 0; i < len; ++i) {
+        _curr_tms = (buf[i >> 3] >> (i & 7)) & 1;
+        jtag_clock(_curr_tms, tdi);
+    }
+    if (len) _curr_tdi = tdi;
+    return len;
 }
 
 uint64_t jtag_writetdi_time = 0;	// performance counter
@@ -129,40 +115,16 @@ volatile uint32_t *reg_gpio_tdi = (volatile uint32_t *)0x200008d0;     // gpio3
 
 // nand2mario: this is the hotspot for JTAG programming and optimized for performance
 static int jtag_writeTDI(const uint8_t *tx, uint8_t *rx, int len, bool end) {
-	bool tms = _curr_tms;
-	bool tdi = _curr_tdi;
-	const uint32_t mask_set = (1 << 25);
-	const uint32_t mask_clear = (1 << 26);
-
-	uint64_t time_start = bflb_mtimer_get_time_us();
-
-	if (rx)
-		memset(rx, 0, len / 8);
-
-	// uint32_t start = get_mcycle();
-	for (uint32_t i = 0; i < len; i++) {
-		if (end && (i == len - 1)) {
-			tms = 1;
-			*reg_gpio_tms |= mask_set;
-		}
-
-		if (tx)
-			tdi = (tx[i >> 3] & (1 << (i & 7)));
-
-		*reg_gpio_tdi |= tdi ? mask_set : mask_clear;	// set TDI
-		*reg_gpio_tck |= mask_clear;					// clock low
-		*reg_gpio_tck |= mask_set;						// clock high
-
-		if (rx) {
-			if (jtag_read_tdo() > 0)
-				rx[i >> 3] |= 1 << (i & 7);
-		}
-	}
-	_curr_tms = tms;
-	_curr_tdi = tdi;
-
-	jtag_writetdi_time += bflb_mtimer_get_time_us() - time_start;
-	return len;
+    const uint64_t start = bflb_mtimer_get_time_us();
+    if (rx) memset(rx, 0, (len + 7) / 8);
+    for (int i = 0; i < len; ++i) {
+        if (end && i == len - 1) _curr_tms = 1;
+        if (tx) _curr_tdi = (tx[i >> 3] >> (i & 7)) & 1;
+        if (jtag_clock(_curr_tms, _curr_tdi, rx != nullptr) && rx)
+            rx[i >> 3] |= 1 << (i & 7);
+    }
+    jtag_writetdi_time += bflb_mtimer_get_time_us() - start;
+    return len;
 }
 
 #define GPIO_INT_MASK    (1<<22)
@@ -263,46 +225,7 @@ void jtag_writeTDI_msb_first_gpio_out_mode(const uint8_t *tx, int bytes, bool en
 }
 
 /*
-static int jtag_writeTDI_slow(const uint8_t *tx, uint8_t *rx, int len, bool end) {
-	int tms = _curr_tms;
-	int tdi = _curr_tdi;
-
-	uint64_t time_start = bflb_mtimer_get_time_us();
-
-	if (rx)
-		memset(rx, 0, len / 8);
-
-	// uint32_t start = get_mcycle();
-	for (uint32_t i = 0; i < len; i++) {
-		if (end && (i == len - 1))
-			tms = 1;
-
-		if (tx)
-			tdi = (tx[i >> 3] & (1 << (i & 7))) ? 1 : 0;
-
-        if (tms) GPIO_PIN_JTAG_TMS_H(); else GPIO_PIN_JTAG_TMS_L();     // send TMS
-        if (tdi) GPIO_PIN_JTAG_TDI_H(); else GPIO_PIN_JTAG_TDI_L();     // send TDI
-        GPIO_PIN_JTAG_TCK_L();                                          // low  TCK 
-		// start = wait_mcycle(start, JTAG_DELAY);
-
-        if (tms) GPIO_PIN_JTAG_TMS_H(); else GPIO_PIN_JTAG_TMS_L();     // send TMS
-        if (tdi) GPIO_PIN_JTAG_TDI_H(); else GPIO_PIN_JTAG_TDI_L();     // send TDI
-        GPIO_PIN_JTAG_TCK_H();                                          // high TCK
-
-        _curr_tms = tms;
-        _curr_tdi = tdi;
-
-		if (rx) {
-			if (jtag_read_tdo() > 0)
-				rx[i >> 3] |= 1 << (i & 7);
-		}
-		// start = wait_mcycle(start, JTAG_DELAY);
-	}
-    // GPIO_PIN_JTAG_TCK_L();                                          // low  TCK
-
-	jtag_writetdi_time += bflb_mtimer_get_time_us() - time_start;
-	return len;
-}
+static int jtag_writeTDI_slow: obsolete duplicate removed.
 */
 
 static int flushTMS(bool flush_buffer) {
@@ -319,24 +242,10 @@ static int flushTMS(bool flush_buffer) {
 	return ret;    
 }
 
-static int jtag_toggleClk_(uint8_t tms, uint8_t tdi, uint32_t clk_len)
-{
-	// uint32_t start = get_mcycle();	
-	for (uint32_t i = 0; i < clk_len; i++) {
-        if (tms) GPIO_PIN_JTAG_TMS_H(); else GPIO_PIN_JTAG_TMS_L();     // send TMS
-        if (tdi) GPIO_PIN_JTAG_TDI_H(); else GPIO_PIN_JTAG_TDI_L();     // send TDI
-        GPIO_PIN_JTAG_TCK_L();                                          // low  TCK
-		// start = wait_mcycle(start, JTAG_DELAY);
-
-        if (tms) GPIO_PIN_JTAG_TMS_H(); else GPIO_PIN_JTAG_TMS_L();     // send TMS
-        if (tdi) GPIO_PIN_JTAG_TDI_H(); else GPIO_PIN_JTAG_TDI_L();     // send TDI
-        GPIO_PIN_JTAG_TCK_H();                                          // high TCK
-		// start = wait_mcycle(start, JTAG_DELAY);
-    }
-	_curr_tms = tms;
-	_curr_tdi = tdi;
-	
-    return clk_len;
+static int jtag_toggleClk_(uint8_t tms, uint8_t tdi, uint32_t len) {
+    for (uint32_t i = 0; i < len; ++i) jtag_clock(tms, tdi);
+    _curr_tms = tms; _curr_tdi = tdi;
+    return len;
 }
 
 static void jtag_toggleClk(int nb)
@@ -720,21 +629,19 @@ static uint32_t readUserCode()
 	return readReg32(READ_USERCODE);	// 0x13
 }
 
-bool pollFlag(uint32_t mask, uint32_t value)
-{
-	uint32_t status;
-	int timeout = 0;
-	do {
-		status = readStatusReg();
-		if (timeout == 100000000){
-			printf("timeout\r\n");
-			return false;
-		}
-		timeout++;
-		// vTaskDelay(1);
-	} while ((status & mask) != value);
-
-	return true;
+bool pollFlag(uint32_t mask, uint32_t value) {
+    // A broken read must not look like a successful request for cleared bits.
+    // Bound both elapsed time and iterations, even if the timer stops advancing.
+    const uint64_t start = bflb_mtimer_get_time_us();
+    poll_mask = mask; poll_value = value;
+    for (poll_reads = 1; poll_reads <= 512; ++poll_reads) {
+        poll_status = readStatusReg();
+        if (poll_status != 0 && poll_status != 0xffffffffU && (poll_status & mask) == value)
+            return true;
+        if (bflb_mtimer_get_time_us() - start >= 500000) break;
+        if ((poll_reads & 7) == 0) vTaskDelay(1);
+    }
+    return false;
 }
 
 bool enableCfg()
@@ -752,7 +659,7 @@ bool disableCfg()
 
 void sendClkUs(unsigned us)
 {
-	uint64_t clocks = 15000000;     // very rough estimate: 15Mhz
+	uint64_t clocks = JTAG_CONTROL_RATE; // explicit control clock upper bound
 	clocks *= us;
 	clocks /= 1000000;
 	jtag_toggleClk(clocks);
@@ -897,30 +804,62 @@ bool writeSRAM_send(const uint8_t *data, uint32_t length, bool last) {
 }
 
 bool writeSRAM_end() {
+    // Complete UPDATE_DR and enter idle before issuing another instruction.
+    // The fast writer ends at EXIT1_DR; the regular shiftDR path already does this.
+    set_state(RUN_TEST_IDLE);
+    jtag_toggleClk(6);
+    send_command(CONFIG_DISABLE);
+    send_command(NOOP);
 
-    // printf("Status after XFER_WRITE: 0x%08x\r\n", readStatusReg());
-    // send checksum
-    // send_command(0x0a);
-    // uint32_t checksum = 0xF12D;     // _checksum;
-	// shiftDR((uint8_t *)&checksum, NULL, 32);
-	// send_command(0x08);
+    verify_first_status = readStatusReg();
+    verify_status = verify_first_status;
+    verify_attempts = 0;
+    // Retry read-only verification after resetting the TAP, not the FPGA SRAM.
+    // A matching UserCode alone never substitutes for DONE and a valid ID/status.
+    do {
+        if (verify_attempts) {
+            go_test_logic_reset();
+            set_state(RUN_TEST_IDLE);
+            jtag_toggleClk(6);
+            verify_status = readStatusReg();
+        }
+        verify_id = idCode();
+        verify_user = readUserCode();
+        ++verify_attempts;
+        if (verify_id == idcodes[0] && verify_status != 0xffffffffU &&
+            (verify_status & STATUS_DONE_FINAL) &&
+            !(verify_status & (STATUS_CRC_ERROR | STATUS_BAD_COMMAND | STATUS_ID_VERIFY_FAILED)))
+            return true;
+        bflb_mtimer_delay_us(1000);
+    } while (verify_attempts < 3);
+    return false;
+}
 
-    // printf("Status after CHECKSUM: 0x%08x\r\n", readStatusReg());
-
-	send_command(CONFIG_DISABLE); // config disable 0x3A
-	send_command(NOOP); // noop 0x02
-
-	uint32_t usercode = readUserCode();
-	uint32_t status_reg = readStatusReg();
-    overlay_status("Usercode=0x%08x, status=0x%08x\r\n", usercode, status_reg);
-
-	if (status_reg & STATUS_DONE_FINAL) {
-		// printf("DONE\r\n");
-		return true;
-	} else {
-		// printf("FAIL\r\n");
-		return false;
-	}
+void fpga_boot_trace(const char *phase, const char *detail) {
+#ifdef UI16_SYSTEM_MENU
+    if (!drv || (strcmp(drv, "sd:") && strcmp(drv, "usb:"))) return;
+    char path[32], line[320];
+    snprintf(path, sizeof path, "%s/crt-boot.log", drv);
+    // This is diagnostic information, independent of CRT settings files.
+    FIL log{};
+    if (f_open(&log, path, FA_OPEN_ALWAYS | FA_WRITE) != FR_OK) return;
+    if (f_size(&log) < 65536 && f_lseek(&log, f_size(&log)) == FR_OK) {
+        const int count = snprintf(line, sizeof line,
+            "jtag2 t=%llu phase=%s id=%08x first=%08x status=%08x user=%08x tries=%u "
+            "poll=%08x/%08x/%08x n=%u %s\n",
+            (unsigned long long)bflb_mtimer_get_time_us(), phase, verify_id,
+            verify_first_status, verify_status, verify_user, verify_attempts,
+            poll_mask, poll_value, poll_status, poll_reads, detail ? detail : "");
+        UINT written = 0;
+        const UINT length = count < int(sizeof line) ? count : sizeof line - 1;
+        if (count > 0 && length <= 65536 - f_size(&log) &&
+            f_write(&log, line, length, &written) == FR_OK && written == length)
+            (void)f_sync(&log);
+    }
+    (void)f_close(&log);
+#else
+    (void)phase; (void)detail;
+#endif
 }
 
 void fpgaStatus() {
@@ -954,6 +893,9 @@ void disable_jtag_pins(void) {
 bool fpga_program(const char *fname) {
     const uint32_t len = get_file_size(fname);
     if (!len) return false;
+    verify_first_status = verify_status = verify_user = verify_id = 0;
+    verify_attempts = poll_reads = 0; poll_mask = poll_value = poll_status = 0;
+    fpga_boot_trace("program-begin", fname);
     overlay_status("Writing %u bytes...", len);
     if (f_open(&fcore, fname, FA_READ) != FR_OK) {
         overlay_status("Cannot open FPGA image");
@@ -966,6 +908,7 @@ bool fpga_program(const char *fname) {
 
     enable_jtag_pins();
     chain_len = detectChain(JTAG_MAX_CHAIN);
+    if (chain_len > 0) verify_id = idcodes[0];
     if (chain_len <= 0 || (idcodes[0] != IDCODE_GW5AT_60 && idcodes[0] != IDCODE_GWAST_138 &&
                           idcodes[0] != IDCODE_GW5A_25 && idcodes[0] != IDCODE_GW2A_18)) {
         overlay_status("No known JTAG device");
@@ -1008,7 +951,6 @@ bool fpga_program(const char *fname) {
     // with the programming critical section still held.
     taskEXIT_CRITICAL();critical = false;
     res = stream_ok && total == len && writeSRAM_end();
-    if (!res) overlay_status("FPGA write/verify failed");
 
 load_core_close:
     if (gpio_mode) jtag_exit_gpio_out_mode();
@@ -1016,6 +958,9 @@ load_core_close:
     free(fbuf_cached);
     if (f_close(&fcore) != FR_OK) res = false;
     disable_jtag_pins();
+    // Close the shared input file and release all critical sections before SD logging.
+    fpga_boot_trace(res ? "program-ok" : "program-failed", fname);
+    overlay_status("J2 ID=%08x S=%08x", verify_id, verify_status);
     DEBUG("FPGA: bytes=%u/%u, time=%llu us, ok=%d", total, len,
           (unsigned long long)(bflb_mtimer_get_time_us() - time_start), res);
     return res;

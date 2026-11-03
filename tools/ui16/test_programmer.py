@@ -81,6 +81,9 @@ static unsigned declared=0,offset=0;
 static std::uint32_t idcodes[8]{};
 static std::vector<BYTE> data,stream;
 static BYTE fbuf[BLOCK_SIZE];static int fcore=0;
+static std::uint32_t verify_first_status,verify_status,verify_user,verify_id,poll_mask,poll_value,poll_status;
+static unsigned verify_attempts,poll_reads;
+void fpga_boot_trace(const char *,const char *){assert(critical==0);}
 std::uint32_t get_file_size(const char *){return declared;}
 void overlay_status(const char *,...){assert(critical==0);}
 void overlay_printf(const char *,...){assert(critical==0);}

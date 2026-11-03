@@ -528,12 +528,14 @@ static bool ui16_hw_program(const char *path,void *)
 }
 static bool ui16_hw_wait_core(int expected,void *)
 {
+    fpga_boot_trace("wait-core", "begin");
     const auto start=bflb_mtimer_get_time_ms();
     do {
         send_blank_packet();active_core=get_core_id();
-        if(active_core==expected)return true;
+        if(active_core==expected){fpga_boot_trace("wait-core", "ok");return true;}
         delay(10);
     } while(bflb_mtimer_get_time_ms()-start<2000);
+    fpga_boot_trace("wait-core", "timeout");
     return false;
 }
 static bool ui16_hw_load_rom(int id,const char *path,void *)
@@ -541,8 +543,12 @@ static bool ui16_hw_load_rom(int id,const char *path,void *)
     auto *target=find_core_by_id(id);
     core_running=false;
     if(!target||!target->load_rom)return false;
+    fpga_boot_trace("crt-prepare", "begin");
     if(crt_stage1_capable)ui16_crt_prepare_game(id,path);
+    fpga_boot_trace("crt-prepare", "end");
+    fpga_boot_trace("rom-load", "begin");
     const int result=target->load_rom(path);
+    fpga_boot_trace("rom-load", result==0&&core_running?"ok":"failed");
     if(result!=0||!core_running){core_running=false;ui16_crt_end_session();return false;}
     overlay(0);return true;
 }

@@ -17,6 +17,8 @@ code=r'''
 static bool crt_stage1_capable=false;
 static unsigned crt_prepares=0,crt_ends=0;
 static std::string crt_path;
+static std::vector<std::string> trace;
+void fpga_boot_trace(const char *phase,const char *detail){trace.push_back(std::string(phase)+":"+detail);}
 void ui16_crt_prepare_game(int id,const char *path){assert(id==1);++crt_prepares;crt_path=path;}
 void ui16_crt_end_session(){++crt_ends;}
 static Ui16GameOsd game_osd_owner=Ui16GameOsd::System;
@@ -71,14 +73,18 @@ int main(){
  assert(ui16_hw_program("x",nullptr));assert(!core_running&&active_core==-1&&!gba_bios_loaded&&!gba_missing_bios_warned&&_overlay_on==1&&joy1_state==0&&joy2_state==0);
  program_ok=false;assert(!ui16_hw_program("x",nullptr));program_ok=true;
  id=1;assert(ui16_hw_wait_core(1,nullptr)&&active_core==1);
+ assert(trace.back()=="wait-core:ok");
  now=0;requests=0;id=2;assert(!ui16_hw_wait_core(1,nullptr)&&now>=2000&&requests<=10);
+ assert(trace.back()=="wait-core:timeout");
  started=true;result=0;assert(ui16_hw_load_rom(1,"sd:nes/a.nes",nullptr)&&!overlay_on());
  result=1;assert(!ui16_hw_load_rom(1,"x",nullptr)&&!core_running);
  result=0;started=false;assert(!ui16_hw_load_rom(1,"x",nullptr)); // Includes SNES invalid-header return-0 case.
  assert(!ui16_hw_load_rom(999,"x",nullptr));
  crt_stage1_capable=true;started=true;result=0;
  assert(ui16_hw_load_rom(1,"sd:nes/test.nes",nullptr)&&crt_prepares==1&&crt_path=="sd:nes/test.nes");
+ assert((std::vector<std::string>(trace.end()-4,trace.end())==std::vector<std::string>{"crt-prepare:begin","crt-prepare:end","rom-load:begin","rom-load:ok"}));
  result=1;const auto ends=crt_ends;assert(!ui16_hw_load_rom(1,"sd:nes/test.nes",nullptr)&&crt_ends==ends+1);
+ assert(trace.back()=="rom-load:failed");
  result=0;crt_stage1_capable=false;
  ui16_hw_display_owner(true,nullptr);assert(owner&&overlay_on());
  ui16_hw_display_owner(false,nullptr);assert(!owner&&overlay_on());
