@@ -253,7 +253,13 @@ void jtag_writeTDI_msb_first_gpio_out_mode(const uint8_t *tx, int bytes, bool en
 		*reg_gpio0_31 = ((byte & 0x1) << 3) | 2 | (i == bytes-1 && end);	// TMS=1 if at the end
 #endif
 	}
-	_curr_tms = end;
+    if (bytes > 0) {
+        _curr_tms = end;
+        _curr_tdi = tx[bytes - 1] & 1;
+        // The last rising edge with TMS=1 has already left SHIFT_DR, just as
+        // read_write(..., last=1) does. Keep set_state() aligned with the TAP.
+        if (end) _state = EXIT1_DR;
+    }
 }
 
 /*
@@ -946,130 +952,71 @@ void disable_jtag_pins(void) {
 /////////////// top programming functions ///////////////
 
 bool fpga_program(const char *fname) {
-    uint64_t writetdi_time_start;
-    uint64_t time_total;
-    UINT bytes = 0, total = 0;
-    uint64_t time_jtag = 0, time_flash = 0;
-
-    // FRESULT res_sd = f_mount(&fs_usb, "usb:", 1);
-    // if (res_sd != FR_OK) {
-    //     overlay_printf("mount fail, res:%d\r\n", res_sd);
-    //     return false;
-    // }
-    int len = get_file_size(fname);
+    const uint32_t len = get_file_size(fname);
+    if (!len) return false;
     overlay_status("Writing %u bytes...", len);
-
-    FRESULT res_sd = f_open(&fcore, fname, FA_READ);
-    if (res_sd != FR_OK) {
-        overlay_printf("open fail, res:%d\r\n", res_sd);
+    if (f_open(&fcore, fname, FA_READ) != FR_OK) {
+        overlay_status("Cannot open FPGA image");
         return false;
     }
-    bool res = false;
+    bool res = false, critical = false, gpio_mode = false, stream_ok = true;
+    BYTE *fbuf_cached = nullptr;
+    UINT bytes = 0, total = 0;
+    const uint64_t time_start = bflb_mtimer_get_time_us();
 
-	enable_jtag_pins();
-
+    enable_jtag_pins();
     chain_len = detectChain(JTAG_MAX_CHAIN);
-    if (chain_len == 0 || (    idcodes[0] != IDCODE_GW5AT_60 
-                            && idcodes[0] != IDCODE_GWAST_138
-                            && idcodes[0] != IDCODE_GW5A_25
-                            && idcodes[0] != IDCODE_GW2A_18)) {
-        overlay_printf("No known board detected, IDCODE=%08x\n", idcodes[0]);
+    if (chain_len <= 0 || (idcodes[0] != IDCODE_GW5AT_60 && idcodes[0] != IDCODE_GWAST_138 &&
+                          idcodes[0] != IDCODE_GW5A_25 && idcodes[0] != IDCODE_GW2A_18)) {
+        overlay_status("No known JTAG device");
         goto load_core_close;
     }
-
-    if (!eraseSRAM()) {
-        overlay_printf("Failed to erase SRAM\n");
-        goto load_core_close;
-    }
-
-    // 138K needs erasing twice
-    overlay_status("Erasing again...");
-    if (!eraseSRAM()) {
-        overlay_printf("Failed to erase SRAM 2nd time\n");
-        goto load_core_close;
-    }    
-
-    if (!writeSRAM_start()) {
-        overlay_printf("Failed to start write SRAM\n");
-        goto load_core_close;
-    }
-
-    BYTE *fbuf_cached;
-    fbuf_cached = (BYTE*)malloc(BLOCK_SIZE);
-    if (!fbuf_cached) {
-        overlay_printf("Cannot malloc buffer\r\n");
+    if (!eraseSRAM() || !eraseSRAM() || !writeSRAM_start()) {
+        overlay_status("Cannot prepare FPGA SRAM");
         goto load_core_close;
     }
 
 #define JTAG_FAST
-
-    extern uint64_t jtag_writetdi_time;
-    writetdi_time_start = jtag_writetdi_time;
-    time_total = bflb_mtimer_get_time_us();
-#ifdef JTAG_FAST
-    taskENTER_CRITICAL();
-    jtag_enter_gpio_out_mode();
-    for (;;) {
-        f_read(&fcore, fbuf, BLOCK_SIZE, &bytes);
-        if (bytes == 0) break;
-        total += bytes;
-        jtag_writeTDI_msb_first_gpio_out_mode(fbuf, bytes, total >= len);
-        if (bytes < BLOCK_SIZE) break;
-    }
-    jtag_exit_gpio_out_mode();
-    if (!writeSRAM_end()) {
-        overlay_status("Failed to program SRAM\n");
-        goto load_core_close;
-    }
-    taskEXIT_CRITICAL();
-
-#else
-    taskENTER_CRITICAL();
-    for (;;) {
-        uint64_t time_flash_start = bflb_mtimer_get_time_us();
-        f_read(&fcore, fbuf, BLOCK_SIZE, &bytes);
-        time_flash += bflb_mtimer_get_time_us() - time_flash_start;
-        // overlay_status("f_read: offset=%u, bytes=%d, 4 bytes=%02x %02x %02x %02x", 
-        //     (uint32_t)f_tell(&fcore), bytes, fbuf[0], fbuf[1], fbuf[2], fbuf[3]);
-
-        if (bytes == 0) break;
-        // reverse msb/lsb as Gowin bitstream needs to MSB first
-        // also copy to cached memory for better performance
-        static unsigned char lookup[16] = {
-            0x0, 0x8, 0x4, 0xc, 0x2, 0xa, 0x6, 0xe,
-            0x1, 0x9, 0x5, 0xd, 0x3, 0xb, 0x7, 0xf, };
-        for (int j = 0; j < bytes; j++)
-            fbuf_cached[j] = lookup[fbuf[j] & 0xf] << 4 | lookup[fbuf[j] >> 4];
-
-        total += bytes;
-        uint64_t time_jtag_start = bflb_mtimer_get_time_us();
-        if (!writeSRAM_send(fbuf_cached, bytes*8, total >= len)) {
-            overlay_status("Failed to send data to SRAM\n");
-            goto free_fbuf_cached;
-        }
-        time_jtag += bflb_mtimer_get_time_us() - time_jtag_start;
-        if (bytes < BLOCK_SIZE) break;
-    } 
-    if (!writeSRAM_end()) {
-        overlay_status("Failed to program SRAM\n");
-        goto free_fbuf_cached;
-    }
-    taskEXIT_CRITICAL();
-
-    free(fbuf_cached);
+#ifndef JTAG_FAST
+    fbuf_cached = (BYTE *)malloc(BLOCK_SIZE);
+    if (!fbuf_cached) goto load_core_close;
 #endif
-
-    time_total = bflb_mtimer_get_time_us() - time_total;
-    DEBUG("Time: total=%lld us, jtag=%lld us, flash=%lld us, writetdi=%lld us", time_total, time_jtag, 
-        time_flash, jtag_writetdi_time - writetdi_time_start);
-
-    // printf("Status after program sram: %x\n", readStatusReg());
-    res = true;
+    taskENTER_CRITICAL();critical = true;
+#ifdef JTAG_FAST
+    jtag_enter_gpio_out_mode();gpio_mode = true;
+#endif
+    while (total < len) {
+        const UINT wanted = len - total < BLOCK_SIZE ? len - total : BLOCK_SIZE;
+        bytes = 0;
+        if (f_read(&fcore, fbuf, wanted, &bytes) != FR_OK || bytes != wanted) { stream_ok = false; break; }
+        total += bytes;
+#ifdef JTAG_FAST
+        jtag_writeTDI_msb_first_gpio_out_mode(fbuf, bytes, total == len);
+#else
+        for (UINT i = 0; i < bytes; ++i) {
+            unsigned char v = fbuf[i], reversed = 0;
+            for (unsigned b = 0; b < 8; ++b) { reversed = (reversed << 1) | (v & 1); v >>= 1; }
+            fbuf_cached[i] = reversed;
+        }
+        if (!writeSRAM_send(fbuf_cached, bytes * 8, total == len)) { stream_ok = false; break; }
+#endif
+    }
+#ifdef JTAG_FAST
+    jtag_exit_gpio_out_mode();gpio_mode = false;
+#endif
+    // No error message, storage close, monitor recovery, or RTOS delay may run
+    // with the programming critical section still held.
+    taskEXIT_CRITICAL();critical = false;
+    res = stream_ok && total == len && writeSRAM_end();
+    if (!res) overlay_status("FPGA write/verify failed");
 
 load_core_close:
-    f_close(&fcore);
-
-	disable_jtag_pins();
-	
+    if (gpio_mode) jtag_exit_gpio_out_mode();
+    if (critical) taskEXIT_CRITICAL();
+    free(fbuf_cached);
+    if (f_close(&fcore) != FR_OK) res = false;
+    disable_jtag_pins();
+    DEBUG("FPGA: bytes=%u/%u, time=%llu us, ok=%d", total, len,
+          (unsigned long long)(bflb_mtimer_get_time_us() - time_start), res);
     return res;
 }
