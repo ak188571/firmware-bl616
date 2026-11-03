@@ -11,8 +11,11 @@
 static std::uint64_t now=0;
 struct Pad{std::uint16_t a=0;};static std::vector<Pad> pads;static unsigned at=0;
 static std::vector<std::array<unsigned,4>> boxes;
+static std::array<char,32*28> hardware;
+static std::vector<std::array<char,32*28>> snapshots;
+static unsigned cursor_x=0,cursor_y=0,writes=0,clears=0;
 int _overlay_on=1;
-void get_joypad_states(std::uint16_t *a,std::uint16_t *b,std::uint16_t *c,std::uint16_t *d){assert(at<pads.size());*a=pads[at++].a;*b=*c=*d=0;}
+void get_joypad_states(std::uint16_t *a,std::uint16_t *b,std::uint16_t *c,std::uint16_t *d){assert(at<pads.size());snapshots.push_back(hardware);*a=pads[at++].a;*b=*c=*d=0;}
 std::uint64_t bflb_mtimer_get_time_ms(){return now;}
 void delay(unsigned n){now+=n;}
 int overlay_on(){return _overlay_on;}
@@ -20,9 +23,13 @@ void overlay(int v){_overlay_on=v;}
 void overlay_osd_capture_begin(){ui16_osd_capture_begin();}
 void overlay_osd_capture_end(){ui16_osd_capture_end();}
 void overlay_osd_window(unsigned x,unsigned y,unsigned w,unsigned h){boxes.push_back({x,y,w,h});}
-void overlay_clear(){ui16_osd_capture_clear();}
-void overlay_cursor(int x,int y){ui16_osd_capture_cursor(x,y);}
-void overlay_printf(const char *fmt,...){char buf[256];va_list a;va_start(a,fmt);std::vsnprintf(buf,sizeof(buf),fmt,a);va_end(a);ui16_osd_capture_text(buf);}
+void overlay_clear(){if(!ui16_osd_capture_clear()){hardware.fill(' ');++clears;}}
+void overlay_cursor(int x,int y){if(!ui16_osd_capture_cursor(x,y)){cursor_x=x;cursor_y=y;}}
+void overlay_printf(const char *fmt,...){
+    char buf[256];va_list a;va_start(a,fmt);std::vsnprintf(buf,sizeof(buf),fmt,a);va_end(a);
+    if(ui16_osd_capture_text(buf))return;
+    for(const char *p=buf;*p;++p){assert(cursor_x<32&&cursor_y<28);hardware[cursor_y*32+cursor_x++]=*p;++writes;}
+}
 void dprint(const char *,...){}
 std::uint8_t key_input(){return 0;}
 void command_console(){}
@@ -35,6 +42,20 @@ struct FutureMenu:Menu{
     bool on_choose(int i)override{return i==1;}
     int osd_width()const override{return 20;}
 };
+struct DialogMenu:FutureMenu{
+    bool on_choose(int i)override{if(i==0)hardware.fill('!');return false;}
+};
+struct VariableMenu:FutureMenu{
+    void render()override{
+        overlay_clear();overlay_cursor(0,10);overlay_printf("FILTER %s",value?"OFF":"STANDARD");
+        overlay_cursor(0,11);overlay_printf("MAIN MENU");
+    }
+};
+static void reset_output(){boxes.clear();snapshots.clear();hardware.fill('?');writes=clears=0;at=0;now=0;_overlay_on=1;}
+static void check_screen(const std::array<char,32*28> &actual,const Ui16OsdFrame &frame){
+    for(unsigned y=frame.y;y<frame.y+frame.height;++y)
+        for(unsigned x=frame.x;x<frame.x+frame.width;++x)assert(actual[y*32+x]==frame.cells[y*32+x]);
+}
 int main(){
     ui16_osd_capture_begin();overlay_clear();overlay_cursor(0,13);overlay_printf("<< Main Menu");ui16_osd_capture_end();
     int top=0,width=0;
@@ -54,13 +75,41 @@ int main(){
     pads={{0x20},{0},{0x80},{0},{0x40},{0},{0x200}};
     ui16_osd_menu_input_loop();assert(!overlay_on());
     std::vector<std::array<unsigned,4>> shown;for(auto b:boxes)if(b[2])shown.push_back(b);
-    assert(shown.size()>=4&&shown[0][0]==12&&shown[0][1]==1);
-    assert(shown[2][0]==1&&shown[2][1]==21); // TOP RIGHT -> BOTTOM LEFT
-    assert(shown[3][0]==12&&shown[3][1]==1);
+    assert(shown.size()==3&&shown[0][0]==12&&shown[0][1]==1);
+    assert(shown[1][0]==1&&shown[1][1]==21); // TOP RIGHT -> BOTTOM LEFT
+    assert(shown[2][0]==12&&shown[2][1]==1);
+    for(auto b:boxes)assert(b[2]&&b[3]); // Never hide the window while updating.
     // Reopening retains the chosen position; A/B on the POS row does not exit.
     menu_clear();auto ptr=std::make_unique<FutureMenu>();push_menu(std::move(ptr));
     _overlay_on=1;at=0;boxes.clear();pads={{0x80},{0},{0x20},{0},{1}};
     ui16_osd_menu_input_loop();assert(overlay_on()&&!menu_is_active()); // Main Menu selected.
     assert(adjustments==1);
-    menu_clear();std::puts("OSD host tests passed: dynamic dimensions, five anchors, stable width, scrolling, immediate move, selection, future parameter adjustment, Main Menu/resume");
+    // Moving selection changes two markers only, without clearing text RAM or
+    // sending another window command. Replay actual writes to verify the result.
+    menu_clear();push_menu(std::make_unique<FutureMenu>());reset_output();
+    pads={{0x20},{0},{0x10},{0},{0x200}};ui16_osd_menu_input_loop();
+    top=0;width=20;
+    const auto selected0=ui16_osd_layout(ui16_osd_canvas(),{10,11},0,top,width,Ui16OsdPosition::TopRight);
+    const auto selected1=ui16_osd_layout(ui16_osd_canvas(),{10,11},1,top,width,Ui16OsdPosition::TopRight);
+    assert(boxes.size()==1&&clears==0&&writes==selected0.width*selected0.height+4);
+    check_screen(snapshots[0],selected0);check_screen(snapshots[1],selected1);check_screen(snapshots[3],selected0);
+    // Changing a value does not erase static labels or the panel border.
+    menu_clear();push_menu(std::make_unique<FutureMenu>());reset_output();
+    pads={{0x80},{0},{0x40},{0},{0x200}};ui16_osd_menu_input_loop();
+    assert(boxes.size()==1&&clears==0&&writes==selected0.width*selected0.height+2);
+    check_screen(snapshots[0],selected0);check_screen(snapshots[4],selected0);
+    // Shorter labels must erase their former suffix, without a panel-wide clear.
+    menu_clear();push_menu(std::make_unique<VariableMenu>());reset_output();
+    pads={{0x80},{0},{0x200}};ui16_osd_menu_input_loop();
+    top=0;width=20;
+    const auto shorter=ui16_osd_layout(ui16_osd_canvas(),{10,11},0,top,width,Ui16OsdPosition::TopRight);
+    assert(boxes.size()==1&&clears==0);check_screen(snapshots[1],shorter);
+    // A dialog can bypass the renderer and overwrite RAM. Returning must
+    // invalidate the cached frame and restore even unchanged characters.
+    menu_clear();push_menu(std::make_unique<DialogMenu>());reset_output();
+    pads={{1},{0},{0},{0x200}};ui16_osd_menu_input_loop();
+    assert(clears==0&&writes==2*selected0.width*selected0.height);
+    check_screen(snapshots[2],selected0);
+    for(auto b:boxes)assert(b[2]&&b[3]);
+    menu_clear();std::puts("OSD host tests passed: dynamic dimensions, five anchors, stable width, scrolling, in-place selection/value changes, no hide/clear, dialog cache recovery, Main Menu/resume");
 }

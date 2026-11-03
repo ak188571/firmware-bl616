@@ -18,11 +18,15 @@ void ui16_osd_menu_input_loop(bool fixed_center,const char *title,bool dual_osd)
     int top=0,width_floor=0;
     std::uint16_t previous=0;
     bool dirty=true;
+    // The UI has one owning task, as does the existing capture canvas. Keep the
+    // saved frame out of that task's call stack; validity is reset on each entry.
+    static Ui16OsdFrame displayed;
+    bool displayed_valid=false;
     while(menu_is_active()&&overlay_on()){
         auto *menu=menu_current();
         if(shown!=menu){
             shown=menu;options=menu->get_options();nav=Ui16Navigation(options.size()+(fixed_center?0:1));
-            top=0;width_floor=menu->osd_width();dirty=true;
+            top=0;width_floor=menu->osd_width();dirty=true;displayed_valid=false;
         }
         if(menu->on_tick(static_cast<std::uint32_t>(bflb_mtimer_get_time_ms())))dirty=true;
         if(dirty||menu->redraw){
@@ -33,14 +37,25 @@ void ui16_osd_menu_input_loop(bool fixed_center,const char *title,bool dual_osd)
             }
             overlay_osd_capture_begin();menu->render();overlay_osd_capture_end();
             const auto frame=ui16_osd_layout(ui16_osd_canvas(),options,nav.selected(),top,width_floor,fixed_center?Ui16OsdPosition::Center:position,!fixed_center,title);
-            // Hide old geometry while replacing character cells; input remains blocked.
-            overlay_osd_window(0,0,0,0);
-            overlay_clear();
+            const bool same_geometry=displayed_valid && frame.x==displayed.x && frame.y==displayed.y &&
+                frame.width==displayed.width && frame.height==displayed.height;
+            // Keep the current window visible. Send only changed character runs
+            // for selection/value updates; a move is populated before committing
+            // its new geometry at the FPGA's next frame boundary.
             for(unsigned row=frame.y;row<frame.y+frame.height;++row){
-                overlay_cursor(frame.x,row);
-                for(unsigned x=frame.x;x<frame.x+frame.width;++x)overlay_printf("%c",frame.cells[row*32+x]);
+                unsigned x=frame.x;
+                while(x<frame.x+frame.width){
+                    if(same_geometry && frame.cells[row*32+x]==displayed.cells[row*32+x]){++x;continue;}
+                    const unsigned start=x;
+                    char run[33];unsigned length=0;
+                    do{run[length++]=frame.cells[row*32+x++];}
+                    while(x<frame.x+frame.width && (!same_geometry || frame.cells[row*32+x]!=displayed.cells[row*32+x]));
+                    run[length]='\0';
+                    overlay_cursor(start,row);overlay_printf("%s",run);
+                }
             }
-            overlay_osd_window(frame.x,frame.y,frame.width,frame.height);
+            if(!same_geometry)overlay_osd_window(frame.x,frame.y,frame.width,frame.height);
+            displayed=frame;displayed_valid=true;
             menu->redraw=false;dirty=false;
         }
         std::uint16_t j1=0,j2=0,h1=0,h2=0;
@@ -66,6 +81,8 @@ void ui16_osd_menu_input_loop(bool fixed_center,const char *title,bool dual_osd)
             const bool full=menu->fullscreen_dialog(nav.selected());
             if(full)overlay_osd_window(0,0,32,28);
             const bool close=menu->on_choose(nav.selected());
+            // A dialog or another direct writer may have changed character RAM.
+            displayed_valid=false;
             if(close&&menu_is_active()&&menu_current()==menu)pop_menu();
             if(!menu_is_active())return;
             // Do not carry a button held in a child dialog to this popup.
