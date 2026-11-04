@@ -59,6 +59,7 @@ static Bytes record(std::uint32_t generation=7,unsigned value=23){
 }
 static void setup(){assert(!active);files.clear();fault.clear();writes=syncs=mkdirs=opens=0;targets.clear();}
 static bool save(const Ui16CrtSettings &value={true,3,3}){const bool ok=ui16_save_crt_override(id,value,file,buffer.data(),buffer.size());assert(!active);return ok;}
+static bool reset_save(){const bool ok=ui16_save_crt_override(id,{true,2,3},file,buffer.data(),buffer.size(),true);assert(!active);return ok;}
 static Ui16CrtRestore restore(){return ui16_read_crt_override(id,file,buffer.data(),buffer.size());}
 int main(){
     setup();assert(save()&&writes==1&&syncs==1&&targets.back()==prefix+".a");
@@ -91,12 +92,29 @@ int main(){
         if(blocked==1){other[4]=2;crc(other);files[prefix+".b"]=other;}
         if(blocked==2){other[20]=0;crc(other);files[prefix+".b"]=other;}
         if(blocked==3)files[prefix+".b"]=record(0x80000007u);
-        const auto before=files;assert(!save()&&files==before&&mkdirs==0&&writes==0);
+        const auto before=files;assert(!save()&&!reset_save()&&files==before&&mkdirs==0&&writes==0);
     }
     setup();assert(!save({true,4,1})&&!save({true,1,4})&&opens==0);
     auto invalid=id;invalid.valid=false;
     assert(!ui16_save_crt_override(invalid,{},file,buffer.data(),buffer.size())&&opens==0);
     assert(!ui16_save_crt_override(id,{},file,nullptr,8192)&&opens==0);
     assert(!ui16_save_crt_override(id,{},file,buffer.data(),32)&&opens==0);
-    std::puts("CRT save PASS: alternate-slot sync/close/exact readback, explicit OFF, generation wrap, torn writes, all write/verification failures, retry protects uncertain generation, corrupt recovery, I/O/schema/conflict refusal and invalid identity");
+    setup();files[prefix+".a"]=record();const auto preserved_user=files[prefix+".a"];
+    assert(reset_save()&&files[prefix+".a"]==preserved_user&&targets.back()==prefix+".b");
+    result=restore();assert(result.state==Ui16CrtReadState::Reset&&!result.override_value.present&&result.generation==8);
+    assert(files[prefix+".b"][6]==1&&files[prefix+".b"][20]==0); // Never encode a numeric recommendation in a Reset.
+    const auto tombstone=files[prefix+".b"];assert(save({true,1,2})&&files[prefix+".b"]==tombstone);
+    result=restore();assert(result.state==Ui16CrtReadState::User&&result.generation==9);
+    setup();assert(reset_save()&&restore().state==Ui16CrtReadState::Reset&&restore().generation==1);
+    setup();files[prefix+".a"]=record(0xffffffffu);assert(reset_save()&&restore().generation==0);
+    for(const char *fail:{"mkdir","writeopen","write","short","sync","close","verifyopen","verifyread","verifyclose","verifybytes"}){
+        setup();const auto old=record();files[prefix+".a"]=old;fault=fail;
+        assert(!reset_save()&&files[prefix+".a"]==old);
+        if(writes)assert(targets.back()==prefix+".b");
+        if(fault=="write"||fault=="short"){fault.clear();assert(restore().state==Ui16CrtReadState::Recovered&&restore().override_value.present&&restore().generation==7);}
+    }
+    setup();files[prefix+".a"]=record();fault="sync";assert(!reset_save());
+    const auto uncertain_reset=files[prefix+".b"];fault.clear();assert(reset_save());
+    assert(files[prefix+".b"]==uncertain_reset&&restore().generation==9&&restore().state==Ui16CrtReadState::Reset);
+    std::puts("CRT save PASS: alternate-slot sync/close/exact readback, Reset tombstones/zero value/retry/user resave, explicit OFF, generation wrap, torn writes, all write/verification failures, retry protects uncertain generation, corrupt recovery, I/O/schema/conflict refusal and invalid identity");
 }

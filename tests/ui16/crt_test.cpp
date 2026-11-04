@@ -36,8 +36,8 @@ void overlay_printf(const char *fmt,...){char s[256];va_list a;va_start(a,fmt);s
 void dprint(const char *,...){}std::uint8_t key_input(){return 0;}void command_console(){}
 
 static unsigned saves=0;static bool save_ok=true;
-static Ui16CrtSettings saved_value;
-bool save_test(const Ui16RomIdentity &id,const Ui16CrtSettings &value){assert(id.valid);++saves;saved_value=value;return save_ok;}
+static Ui16CrtSettings saved_value;static bool saved_reset=false;
+bool save_test(const Ui16RomIdentity &id,const Ui16CrtSettings &value,bool reset){assert(id.valid);++saves;saved_value=value;saved_reset=reset;return save_ok;}
 int main(){
     assert(ui16_osd_request(0x84,0)==Ui16GameOsd::System);
     assert(ui16_osd_request(0,0x44)==Ui16GameOsd::Crt);
@@ -71,7 +71,7 @@ int main(){
     ui16_crt_new_session();assert(config==preserved&&critical_depth==0);
     // The effect-capable core advertises actual blur and omits scanline control.
     std::unique_ptr<Menu> blur_menu(ui16_create_crt_menu(true));
-    assert((blur_menu->get_options()==std::vector<int>{3,4,9}));
+    assert((blur_menu->get_options()==std::vector<int>{3,4,9,10}));
     assert(blur_menu->on_adjust(0,1));assert(config==(preserved|0x10000));
     assert(blur_menu->on_adjust(1,1));assert(config==(preserved|0x30000));
     assert(!blur_menu->on_adjust(2,1));assert(config==(preserved|0x30000));
@@ -84,7 +84,7 @@ int main(){
     _overlay_on=1;assert(!blur_menu->on_choose(2)&&overlay_on());
     ui16_crt_new_session();assert(config==preserved);
     std::unique_ptr<Menu> scan_menu(ui16_create_crt_menu(true,true));
-    assert((scan_menu->get_options()==std::vector<int>{3,4,5,9}));
+    assert((scan_menu->get_options()==std::vector<int>{3,4,5,9,10}));
     assert(scan_menu->on_adjust(0,1));assert(scan_menu->on_adjust(1,1));
     for(unsigned level=1;level<=4;level++){
         assert(scan_menu->on_adjust(2,1));
@@ -94,7 +94,7 @@ int main(){
     ui16_crt_accept_status(config);assert(scan_menu->on_tick(30));
     ui16_osd_capture_begin();scan_menu->render();ui16_osd_capture_end();
     const auto &scan_cells=ui16_osd_canvas().cells;
-    assert(std::string(scan_cells.data(),32).find("CRT SAVE - STAGE5E")!=std::string::npos);
+    assert(std::string(scan_cells.data(),32).find("CRT RESET - STAGE5F")!=std::string::npos);
     assert(std::string(scan_cells.data()+5*32,32).find("STRONG")!=std::string::npos);
     assert(std::string(scan_cells.data()+7*32,32).find("FRAME ACK")!=std::string::npos);
     assert(!scan_menu->on_choose(3)&&overlay_on());
@@ -108,7 +108,7 @@ int main(){
     now=1300;retry_menu->on_tick(now);assert(config_sends==sent+1&&config==desired);
     ui16_crt_accept_status(desired);now=1310;assert(retry_menu->on_tick(now));
     now=1700;retry_menu->on_tick(now);assert(config_sends==sent+1);
-    assert(retry_menu->inline_choice(0)&&retry_menu->inline_choice(2)&&!retry_menu->inline_choice(3));
+    assert(retry_menu->inline_choice(0)&&retry_menu->inline_choice(2)&&!retry_menu->inline_choice(3)&&retry_menu->inline_choice(4));
     // An old status reply must not acknowledge a newer setting.
     assert(retry_menu->on_adjust(2,1));const auto newer=config;
     ui16_crt_accept_status(desired);now=2000;assert(!retry_menu->on_tick(now));
@@ -174,7 +174,7 @@ int main(){
     assert(std::string(ui16_osd_canvas().cells.data()+32,32).find("SAVE: SAVED")!=std::string::npos);
     assert(preset_menu->on_adjust(2,1));save_ok=false;
     assert(!preset_menu->on_choose(3)&&saves==3&&overlay_on());
-    assert((preset_menu->get_options()==std::vector<int>{3,4,5,9}));
+    assert((preset_menu->get_options()==std::vector<int>{3,4,5,9,10}));
     ui16_osd_capture_begin();preset_menu->render();ui16_osd_capture_end();
     assert(std::string(ui16_osd_canvas().cells.data()+32,32).find("SAVE: FAILED")!=std::string::npos);
     save_ok=true;assert(!preset_menu->on_choose(3)&&saves==4&&overlay_on()); // Retry stays open too.
@@ -190,6 +190,44 @@ int main(){
         menu_clear();push_menu(std::move(failing));_overlay_on=1;at=0;pads={static_cast<std::uint16_t>(back)};
         ui16_osd_menu_input_loop(false,"CRT SETTINGS",true);
         assert(!overlay_on()&&saves==before_back&&config==recommended.settings.merge(preserved));menu_clear();
+    }
+    save_ok=true;
+    // Reset is a preview until explicit SAVE; cancelling restores values and intent.
+    ui16_crt_new_session(recommended,rom_id,saved,save_test);save_ok=true;
+    preset_menu.reset(ui16_create_crt_menu(true,true));_overlay_on=1;const auto before_reset=saves;
+    assert(!preset_menu->on_choose(4)&&saves==before_reset);
+    assert(config==recommended.settings.merge(preserved));
+    ui16_osd_capture_begin();preset_menu->render();ui16_osd_capture_end();
+    assert(std::string(ui16_osd_canvas().cells.data()+32,32).find("UNSAVED")!=std::string::npos);
+    assert(preset_menu->on_close()&&config==saved.override_value.settings.merge(preserved)&&saves==before_reset);
+    assert(!preset_menu->on_choose(4));assert(!preset_menu->on_choose(3));
+    assert(saves==before_reset+1&&saved_reset&&saved_value==recommended.settings&&overlay_on()==1);
+    assert(!preset_menu->on_choose(3)&&saves==before_reset+1); // Confirmed Reset does not write twice.
+    assert(preset_menu->on_adjust(1,1));assert(preset_menu->on_close());
+    assert(config==recommended.settings.merge(preserved));
+    // Equal numeric values still need a tombstone to stop pinning future CSV changes.
+    ui16_crt_new_session(recommended,rom_id,{Ui16CrtReadState::User,recommended},save_test);
+    assert(!preset_menu->on_choose(4));
+    ui16_osd_capture_begin();preset_menu->render();ui16_osd_capture_end();
+    assert(std::string(ui16_osd_canvas().cells.data()+32,32).find("UNSAVED")!=std::string::npos);
+    assert(!preset_menu->on_choose(3)&&saved_reset);
+    const Ui16CrtRecommendation changed_csv{true,{false,2,3}};
+    ui16_crt_new_session(changed_csv,rom_id,{Ui16CrtReadState::Reset,{},1,9},save_test);
+    assert(config==changed_csv.settings.merge(preserved));
+    const auto after_reload=saves;assert(!preset_menu->on_choose(3)&&saves==after_reload);
+    assert(preset_menu->on_adjust(1,1));assert(!preset_menu->on_choose(3)&&!saved_reset); // Editing after Reset saves an override.
+    // No CSV means Reset uses builtin OFF, not the old user settings.
+    ui16_crt_new_session({},rom_id,saved,save_test);assert(!preset_menu->on_choose(4)&&config==preserved);
+    assert(!preset_menu->on_choose(3)&&saved_reset&&saved_value==Ui16CrtSettings{});
+    // Failed Reset SAVE keeps the preview and cancelling through real X/Y restores the user baseline.
+    for(unsigned back:{0x200u,0x2u}){
+        ui16_crt_new_session(recommended,rom_id,saved,save_test);save_ok=false;
+        auto reset_menu=std::unique_ptr<Menu>(ui16_create_crt_menu(true,true));
+        assert(!reset_menu->on_choose(4));assert(!reset_menu->on_choose(3));assert(saved_reset);
+        const auto writes_before_cancel=saves;
+        menu_clear();push_menu(std::move(reset_menu));_overlay_on=1;at=0;pads={static_cast<std::uint16_t>(back)};
+        ui16_osd_menu_input_loop(false,"CRT SETTINGS",true);
+        assert(!overlay_on()&&saves==writes_before_cancel&&config==saved.override_value.settings.merge(preserved));menu_clear();
     }
     save_ok=true;
     assert(critical_depth==0);

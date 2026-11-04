@@ -51,9 +51,9 @@ Ui16CrtRestore ui16_read_crt_override(const Ui16RomIdentity &identity,FIL &file,
  ++restore_calls;io_order.push_back("restore");
  return identity.valid?Ui16CrtRestore{Ui16CrtReadState::User,{true,{true,3,3}}}:Ui16CrtRestore{};
 }
-static unsigned save_calls=0;
-bool ui16_save_crt_override(const Ui16RomIdentity &,const Ui16CrtSettings &,FIL &file,void *buffer,unsigned capacity){
- assert(&file==&fcore&&buffer==fbuf&&capacity==BLOCK_SIZE);++save_calls;return true;
+static unsigned save_calls=0;static bool saved_reset=false;
+bool ui16_save_crt_override(const Ui16RomIdentity &,const Ui16CrtSettings &,FIL &file,void *buffer,unsigned capacity,bool reset=false){
+ assert(&file==&fcore&&buffer==fbuf&&capacity==BLOCK_SIZE);++save_calls;saved_reset=reset;return true;
 }
 void overlay_status(const char *,...){}
 static int tx_done=0,uart_device=0;
@@ -155,10 +155,11 @@ int main(){
  assert(captured_id.same_game(crt_rom_identity));
  crt_restore={Ui16CrtReadState::User,{true,{true,3,3}}};launch_handoff(Ui16LaunchError::None,seeded);assert(captured_restore.override_value.present);
  active_core=1;core_running=true;crt_stage1_capable=true;
- assert(ui16_hw_save_crt(crt_rom_identity,{true,1,2})&&save_calls==1);
- active_core=6;assert(!ui16_hw_save_crt(crt_rom_identity,{})&&save_calls==1);
- active_core=1;core_running=false;assert(!ui16_hw_save_crt(crt_rom_identity,{})&&save_calls==1);
- core_running=true;crt_stage1_capable=false;assert(!ui16_hw_save_crt(crt_rom_identity,{})&&save_calls==1);
+ assert(ui16_hw_save_crt(crt_rom_identity,{true,1,2})&&save_calls==1&&!saved_reset);
+ assert(ui16_hw_save_crt(crt_rom_identity,{true,1,2},true)&&save_calls==2&&saved_reset);
+ active_core=6;assert(!ui16_hw_save_crt(crt_rom_identity,{})&&save_calls==2);
+ active_core=1;core_running=false;assert(!ui16_hw_save_crt(crt_rom_identity,{})&&save_calls==2);
+ core_running=true;crt_stage1_capable=false;assert(!ui16_hw_save_crt(crt_rom_identity,{})&&save_calls==2);
  std::puts("Actual main.cpp adapters passed: stat/program/ID timeout/load state, display ownership, unmodified X/Y game HID, OSD chord, neutral packets");
 }
 '''
@@ -243,7 +244,7 @@ void overlay_osd_window(unsigned,unsigned,unsigned,unsigned);
 extern bool crt_stage1_capable;
 extern Ui16RomIdentity crt_rom_identity;
 extern Ui16CrtRestore crt_restore;
-bool ui16_hw_save_crt(const Ui16RomIdentity &,const Ui16CrtSettings &);
+bool ui16_hw_save_crt(const Ui16RomIdentity &,const Ui16CrtSettings &,bool);
 static bool crt_blur_capable=false,crt_scanline_capable=false;
 extern Ui16GameOsd game_osd_owner;
 void delay(unsigned);

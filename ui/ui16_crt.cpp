@@ -8,7 +8,9 @@ Ui16CrtSettings settings;
 bool initial_from_csv=false;
 Ui16RomIdentity identity;
 Ui16CrtRestore restored;
-Ui16CrtSettings persisted;
+Ui16CrtSettings persisted,session_recommended;
+bool persisted_reset=false,reset_preview=false;
+bool dirty(){return settings!=persisted||reset_preview!=persisted_reset;}
 Ui16CrtSaveFn save_callback=nullptr;
 bool saved_user=false,save_failed=false;
 volatile std::uint32_t applied_status=0;
@@ -30,8 +32,8 @@ struct CrtMenu:Menu {
     bool matched=false;
     int osd_width()const override{return 23;}
     void render()override {
-        overlay_clear();overlay_cursor(0,0);overlay_printf("%s",scan_supported?"CRT SAVE - STAGE5E":blur_supported?"H BLUR READY - STAGE4A":"BYPASS ONLY - STAGE 1");
-        overlay_cursor(0,1);overlay_printf("SAVE: %s",save_failed?"FAILED":settings!=persisted?"UNSAVED":saved_user?"SAVED":"RECOMMENDED");
+        overlay_clear();overlay_cursor(0,0);overlay_printf("%s",scan_supported?"CRT RESET - STAGE5F":blur_supported?"H BLUR READY - STAGE4A":"BYPASS ONLY - STAGE 1");
+        overlay_cursor(0,1);overlay_printf("SAVE: %s",save_failed?"FAILED":dirty()?"UNSAVED":(saved_user||persisted_reset)?"SAVED":"RECOMMENDED");
         overlay_cursor(0,2);overlay_printf("INITIAL: %s",restored.override_value.present?"USER":initial_from_csv?"CSV":"DEFAULT");
         overlay_cursor(0,3);overlay_printf("%s %s",blur_supported?"CRT ENABLE  ":"CRT REQUEST ",settings.enabled?"ON":"OFF");
         overlay_cursor(0,4);overlay_printf("%s %s",blur_supported?"H BLUR      ":"H BLUR REQ  ",strength(settings.blur));
@@ -43,30 +45,36 @@ struct CrtMenu:Menu {
         overlay_cursor(0,8);if(identity.valid)overlay_printf("ROM ID: %08lx",static_cast<unsigned long>(identity.crc));
         else overlay_printf("ROM ID: UNAVAILABLE");
         overlay_cursor(0,9);overlay_printf("SAVE (X/Y: CANCEL)");
+        overlay_cursor(0,10);overlay_printf("RESET TO RECOMMENDED");
     }
-    std::vector<int> get_options()override{if(blur_supported&&!scan_supported)return {3,4,9};return {3,4,5,9};}
+    std::vector<int> get_options()override{if(blur_supported&&!scan_supported)return {3,4,9,10};return {3,4,5,9,10};}
     bool on_adjust(int row,int delta)override {
         if(row==0)settings.enabled=!settings.enabled;
         else if(row==1)settings.blur=(settings.blur+(delta>0?1:3))%4;
         else if(row==2&&(!blur_supported||scan_supported))settings.scanline=(settings.scanline+(delta>0?1:3))%4;
         else return false;
-        save_failed=false;matched=false;send_settings();return true;
+        reset_preview=false;save_failed=false;matched=false;send_settings();return true;
     }
     bool on_close()override {
         // X/Y cancels this preview, including the live FPGA configuration.
         if(settings!=persisted){settings=persisted;matched=false;send_settings();}
-        save_failed=false;return true;
+        reset_preview=persisted_reset;save_failed=false;return true;
     }
     bool on_choose(int row)override {
-        if(row==((blur_supported&&!scan_supported)?2:3)){
-            if(settings==persisted&&saved_user)save_failed=false;
-            else if(!save_callback||!save_callback(identity,settings))save_failed=true;
-            else {persisted=settings;saved_user=true;save_failed=false;}
+        const int save_row=(blur_supported&&!scan_supported)?2:3;
+        if(row==save_row+1){
+            settings=session_recommended;reset_preview=true;save_failed=false;
+            matched=false;send_settings();redraw=true;return false;
+        }
+        if(row==save_row){
+            if(!dirty()&&(saved_user||persisted_reset))save_failed=false;
+            else if(!save_callback||!save_callback(identity,settings,reset_preview))save_failed=true;
+            else {persisted=settings;persisted_reset=reset_preview;saved_user=!reset_preview;save_failed=false;}
             redraw=true;return false; // SAVE never dismisses the OSD.
         }
         on_adjust(row,1);redraw=true;return false;
     }
-    bool inline_choice(int row)const override{return row<((blur_supported&&!scan_supported)?2:3);}
+    bool inline_choice(int row)const override{const int save_row=(blur_supported&&!scan_supported)?2:3;return row<save_row||row==save_row+1;}
     bool on_tick(std::uint32_t now)override {
         bool seen;std::uint32_t value;
         taskENTER_CRITICAL();seen=status_seen;value=applied_status;taskEXIT_CRITICAL();
@@ -88,9 +96,13 @@ void ui16_crt_new_session(const Ui16CrtRecommendation &recommended,const Ui16Rom
     if(!identity.valid||!restore.override_value.present||restore.override_value.settings.blur>3||restore.override_value.settings.scanline>3||
        (restore.state!=Ui16CrtReadState::User&&restore.state!=Ui16CrtReadState::Recovered))restored.override_value={};
     initial_from_csv=recommended.present&&recommended.settings.blur<=3&&recommended.settings.scanline<=3;
-    settings=initial_from_csv?recommended.settings:Ui16CrtSettings{};
+    session_recommended=initial_from_csv?recommended.settings:Ui16CrtSettings{};
+    settings=session_recommended;
     if(restored.override_value.present)settings=restored.override_value.settings;
     persisted=settings;saved_user=restored.override_value.present;
+    persisted_reset=identity.valid&&!saved_user&&(restore.state==Ui16CrtReadState::Reset||
+        (restore.state==Ui16CrtReadState::Recovered&&restore.selected_slot>=0));
+    reset_preview=persisted_reset;
     send_settings();
 }
 void ui16_crt_accept_status(std::uint32_t applied) {

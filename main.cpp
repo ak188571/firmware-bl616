@@ -512,9 +512,9 @@ static bool ui16_hw_osd_ready(void *)
 static Ui16RomIdentity crt_rom_identity;
 static Ui16CrtRestore crt_restore;
 // Only the validated NES path owns these resources without background disk I/O.
-static bool ui16_hw_save_crt(const Ui16RomIdentity &identity,const Ui16CrtSettings &value){
+static bool ui16_hw_save_crt(const Ui16RomIdentity &identity,const Ui16CrtSettings &value,bool reset=false){
     if(!core_running||active_core!=1||!crt_stage1_capable||identity.system!=1)return false;
-    return ui16_save_crt_override(identity,value,fcore,fbuf,BLOCK_SIZE);
+    return ui16_save_crt_override(identity,value,fcore,fbuf,BLOCK_SIZE,reset);
 }
 static bool ui16_hw_file_ready(const char *path,void *)
 {
