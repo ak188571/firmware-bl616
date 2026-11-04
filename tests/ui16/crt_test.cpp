@@ -35,6 +35,9 @@ void overlay_cursor(int x,int y){ui16_osd_capture_cursor(x,y);}
 void overlay_printf(const char *fmt,...){char s[256];va_list a;va_start(a,fmt);std::vsnprintf(s,sizeof s,fmt,a);va_end(a);ui16_osd_capture_text(s);}
 void dprint(const char *,...){}std::uint8_t key_input(){return 0;}void command_console(){}
 
+static unsigned saves=0;static bool save_ok=true;
+static Ui16CrtSettings saved_value;
+bool save_test(const Ui16RomIdentity &id,const Ui16CrtSettings &value){assert(id.valid);++saves;saved_value=value;return save_ok;}
 int main(){
     assert(ui16_osd_request(0x84,0)==Ui16GameOsd::System);
     assert(ui16_osd_request(0,0x44)==Ui16GameOsd::Crt);
@@ -91,7 +94,7 @@ int main(){
     ui16_crt_accept_status(config);assert(scan_menu->on_tick(30));
     ui16_osd_capture_begin();scan_menu->render();ui16_osd_capture_end();
     const auto &scan_cells=ui16_osd_canvas().cells;
-    assert(std::string(scan_cells.data(),32).find("CRT RESTORE - STAGE5D")!=std::string::npos);
+    assert(std::string(scan_cells.data(),32).find("CRT SAVE - STAGE5E")!=std::string::npos);
     assert(std::string(scan_cells.data()+5*32,32).find("STRONG")!=std::string::npos);
     assert(std::string(scan_cells.data()+7*32,32).find("FRAME ACK")!=std::string::npos);
     assert(scan_menu->on_choose(3)&&!overlay_on());
@@ -158,6 +161,30 @@ int main(){
     ui16_crt_new_session(recommended,{},saved);assert(config==recommended.settings.merge(preserved));
     ui16_crt_new_session(recommended,rom_id,{Ui16CrtReadState::Bad,saved.override_value});assert(config==recommended.settings.merge(preserved));
     ui16_crt_new_session(recommended,rom_id,{Ui16CrtReadState::User,{true,{true,4,1}}});assert(config==recommended.settings.merge(preserved));
+    ui16_crt_new_session(recommended,rom_id,{},save_test);
+    preset_menu.reset(ui16_create_crt_menu(true,true));saves=0;
+    assert(preset_menu->on_close()&&saves==0); // Clean close never writes.
+    assert(preset_menu->on_adjust(1,1));assert(preset_menu->on_close()&&saves==1);
+    assert(saved_value==Ui16CrtSettings({true,2,2}));
+    ui16_osd_capture_begin();preset_menu->render();ui16_osd_capture_end();
+    assert(std::string(ui16_osd_canvas().cells.data()+32,32).find("SAVE: SAVED")!=std::string::npos);
+    assert(preset_menu->on_close()&&saves==1);
+    assert(preset_menu->on_adjust(2,1));save_ok=false;
+    assert(!preset_menu->on_close()&&saves==2&&preset_menu->get_options().back()==10);
+    ui16_osd_capture_begin();preset_menu->render();ui16_osd_capture_end();
+    assert(std::string(ui16_osd_canvas().cells.data()+32,32).find("SAVE: FAILED")!=std::string::npos);
+    save_ok=true;assert(preset_menu->on_close()&&saves==3);
+    assert(preset_menu->on_adjust(1,1));save_ok=false;assert(!preset_menu->on_choose(3));
+    assert(preset_menu->on_choose(4)); // Explicit leave without successful persistence.
+    preset_menu.reset(ui16_create_crt_menu(true,true));save_ok=true;assert(preset_menu->on_close());
+    // The real X/Y path must veto close on failure, not bypass the save hook.
+    ui16_crt_new_session(recommended,rom_id,{},save_test);save_ok=false;
+    auto failing=std::unique_ptr<Menu>(ui16_create_crt_menu(true,true));assert(failing->on_adjust(1,1));
+    menu_clear();push_menu(std::move(failing));_overlay_on=1;at=0;
+    const auto before_failed_back=saves;
+    pads={0x200,0,0x20,0,0x20,0,0x20,0,0x20,0,0x100,0};
+    ui16_osd_menu_input_loop(false,"CRT SETTINGS",true);
+    assert(!overlay_on()&&saves==before_failed_back+1);menu_clear();save_ok=true;
     assert(critical_depth==0);
     std::puts("CRT host PASS: hotkeys, preserved config, frame ACK/retry, stale ACK rejection, CSV/default/explicit OFF seeds, invalid seed fallback, same-game edits and per-launch reset");
 }

@@ -51,6 +51,10 @@ Ui16CrtRestore ui16_read_crt_override(const Ui16RomIdentity &identity,FIL &file,
  ++restore_calls;io_order.push_back("restore");
  return identity.valid?Ui16CrtRestore{Ui16CrtReadState::User,{true,{true,3,3}}}:Ui16CrtRestore{};
 }
+static unsigned save_calls=0;
+bool ui16_save_crt_override(const Ui16RomIdentity &,const Ui16CrtSettings &,FIL &file,void *buffer,unsigned capacity){
+ assert(&file==&fcore&&buffer==fbuf&&capacity==BLOCK_SIZE);++save_calls;return true;
+}
 void overlay_status(const char *,...){}
 static int tx_done=0,uart_device=0;
 static int *uart1_dev=&uart_device;
@@ -86,7 +90,7 @@ static Ui16CrtRecommendation captured;
 static Ui16RomIdentity captured_id;
 static Ui16CrtRestore captured_restore;
 void ui16_wait_release(){++releases;}
-void ui16_crt_new_session(const Ui16CrtRecommendation &value,const Ui16RomIdentity &identity,const Ui16CrtRestore &restore){++session_calls;captured=value;captured_id=identity;captured_restore=restore;}
+void ui16_crt_new_session(const Ui16CrtRecommendation &value,const Ui16RomIdentity &identity,const Ui16CrtRestore &restore,Ui16CrtSaveFn save){assert(save==ui16_hw_save_crt);++session_calls;captured=value;captured_id=identity;captured_restore=restore;}
 struct FakeLaunch {
  Ui16LaunchError result;
  Ui16LaunchError launch(const char *,const Ui16LaunchTarget &,const Ui16LaunchRequest &){return result;}
@@ -150,6 +154,11 @@ int main(){
  launch_handoff(Ui16LaunchError::None,Ui16LaunchRequest{1,"","other.nes"});assert(session_calls==2&&!captured.present);
  assert(captured_id.same_game(crt_rom_identity));
  crt_restore={Ui16CrtReadState::User,{true,{true,3,3}}};launch_handoff(Ui16LaunchError::None,seeded);assert(captured_restore.override_value.present);
+ active_core=1;core_running=true;crt_stage1_capable=true;
+ assert(ui16_hw_save_crt(crt_rom_identity,{true,1,2})&&save_calls==1);
+ active_core=6;assert(!ui16_hw_save_crt(crt_rom_identity,{})&&save_calls==1);
+ active_core=1;core_running=false;assert(!ui16_hw_save_crt(crt_rom_identity,{})&&save_calls==1);
+ core_running=true;crt_stage1_capable=false;assert(!ui16_hw_save_crt(crt_rom_identity,{})&&save_calls==1);
  std::puts("Actual main.cpp adapters passed: stat/program/ID timeout/load state, display ownership, unmodified X/Y game HID, OSD chord, neutral packets");
 }
 '''
@@ -234,6 +243,7 @@ void overlay_osd_window(unsigned,unsigned,unsigned,unsigned);
 extern bool crt_stage1_capable;
 extern Ui16RomIdentity crt_rom_identity;
 extern Ui16CrtRestore crt_restore;
+bool ui16_hw_save_crt(const Ui16RomIdentity &,const Ui16CrtSettings &);
 static bool crt_blur_capable=false,crt_scanline_capable=false;
 extern Ui16GameOsd game_osd_owner;
 void delay(unsigned);

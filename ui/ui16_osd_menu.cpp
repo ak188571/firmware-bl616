@@ -67,7 +67,10 @@ void ui16_osd_menu_input_loop(bool fixed_center,const char *title,bool dual_osd)
         const auto pressed=static_cast<std::uint16_t>(buttons&~previous);previous=buttons;
         const bool conflict=(buttons&UI16_BUTTON_CONFIRM)&&(buttons&UI16_BUTTON_BACK);
         if(!dual_osd&&(j1==OSD_KEY_CODE||j2==OSD_KEY_CODE||h1==OSD_KEY_CODE||h2==OSD_KEY_CODE)&&pressed){overlay(0);return;}
-        if(!conflict&&(pressed&UI16_BUTTON_BACK)){overlay(0);return;}
+        if(!conflict&&(pressed&UI16_BUTTON_BACK)){
+            if(menu->on_close()){overlay(0);return;}
+            dirty=true;delay(10);continue;
+        }
         const auto now=static_cast<std::uint32_t>(bflb_mtimer_get_time_ms());
         if(nav.update(buttons,now))dirty=true;
         const bool left=(pressed&0x40)!=0,right=(pressed&0x80)!=0;

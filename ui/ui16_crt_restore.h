@@ -6,6 +6,8 @@ enum class Ui16CrtReadState { NoId, Missing, User, Reset, Recovered, Bad, Io, Fu
 struct Ui16CrtRestore {
     Ui16CrtReadState state=Ui16CrtReadState::NoId;
     Ui16CrtRecommendation override_value;
+    int selected_slot=-1;
+    std::uint32_t generation=0;
 };
 inline const char *ui16_crt_read_name(Ui16CrtReadState state){
     switch(state){

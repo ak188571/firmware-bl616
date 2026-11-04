@@ -23,7 +23,8 @@ inline Ui16GameOsd ui16_osd_request(std::uint16_t direct,std::uint16_t hid) {
 }
 #include "ui16_crt_settings.h"
 
+using Ui16CrtSaveFn=bool (*)(const Ui16RomIdentity &,const Ui16CrtSettings &);
 struct Menu;
 Menu *ui16_create_crt_menu(bool horizontal_blur=false,bool scanline=false);
-void ui16_crt_new_session(const Ui16CrtRecommendation &recommended={},const Ui16RomIdentity &rom_id={},const Ui16CrtRestore &restore={});
+void ui16_crt_new_session(const Ui16CrtRecommendation &recommended={},const Ui16RomIdentity &rom_id={},const Ui16CrtRestore &restore={},Ui16CrtSaveFn save=nullptr);
 void ui16_crt_accept_status(std::uint32_t applied);

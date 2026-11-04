@@ -44,6 +44,7 @@ extern "C" {
 #include "ui16_crt.h"
 #include "ui16_rom_id_reader.h"
 #include "ui16_crt_restore_reader.h"
+#include "ui16_crt_save.h"
 #ifdef UI16_SD_FONT
 #include "ui16_font_cache.h"
 #ifdef UI16_RELIABLE_FONT
@@ -510,6 +511,11 @@ static bool ui16_hw_osd_ready(void *)
 // UI16 launch adapters BEGIN (host-tested with hardware substitutes)
 static Ui16RomIdentity crt_rom_identity;
 static Ui16CrtRestore crt_restore;
+// Only the validated NES path owns these resources without background disk I/O.
+static bool ui16_hw_save_crt(const Ui16RomIdentity &identity,const Ui16CrtSettings &value){
+    if(!core_running||active_core!=1||!crt_stage1_capable||identity.system!=1)return false;
+    return ui16_save_crt_override(identity,value,fcore,fbuf,BLOCK_SIZE);
+}
 static bool ui16_hw_file_ready(const char *path,void *)
 {
     FILINFO info{};
@@ -708,7 +714,7 @@ static void main_task(void *pvParameters)
                 if(error==Ui16LaunchError::None){
                     // Preserve normal game input; the UI button assignment is not a game remap.
                     ui16_wait_release();
-                    if(crt_stage1_capable)ui16_crt_new_session(request.crt_recommendation,crt_rom_identity,crt_restore);
+                    if(crt_stage1_capable)ui16_crt_new_session(request.crt_recommendation,crt_rom_identity,crt_restore,ui16_hw_save_crt);
                     for(;;){
                         overlay(0);send_hid_to_core();
                         ui16_wait_release();overlay_osd_window(0,0,0,0);overlay(1);

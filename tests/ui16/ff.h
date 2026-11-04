@@ -2,8 +2,8 @@
 // Minimal host-test FatFs declarations, not used by the firmware build.
 #include <stddef.h>
 typedef int FRESULT;
-enum { FR_OK = 0, FR_DISK_ERR = 1, FR_NO_PATH = 5 };
-enum { FR_NO_FILE = 4, FA_READ = 1 };
+enum { FR_OK = 0, FR_DISK_ERR = 1, FR_NO_FILE = 4, FR_NO_PATH = 5, FR_EXIST = 8 };
+enum { FA_READ = 1, FA_WRITE = 2, FA_CREATE_ALWAYS = 8 };
 typedef unsigned int UINT;
 typedef struct { size_t position; size_t size; } FIL;
 typedef size_t FSIZE_t;
@@ -18,3 +18,7 @@ typedef struct { unsigned char fattrib; char fname[256]; } FILINFO;
 FRESULT f_opendir(DIR *dir, const char *path);
 FRESULT f_readdir(DIR *dir, FILINFO *info);
 FRESULT f_closedir(DIR *dir);
+
+FRESULT f_mkdir(const char *path);
+FRESULT f_write(FIL *file,const void *buffer,UINT length,UINT *written);
+FRESULT f_sync(FIL *file);

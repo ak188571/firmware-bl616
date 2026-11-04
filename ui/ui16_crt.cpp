@@ -8,6 +8,9 @@ Ui16CrtSettings settings;
 bool initial_from_csv=false;
 Ui16RomIdentity identity;
 Ui16CrtRestore restored;
+Ui16CrtSettings persisted;
+Ui16CrtSaveFn save_callback=nullptr;
+bool saved_user=false,save_failed=false;
 volatile std::uint32_t applied_status=0;
 volatile bool status_seen=false;
 std::uint32_t last_send_ms=0;
@@ -27,8 +30,8 @@ struct CrtMenu:Menu {
     bool matched=false;
     int osd_width()const override{return 23;}
     void render()override {
-        overlay_clear();overlay_cursor(0,0);overlay_printf("%s",scan_supported?"CRT RESTORE - STAGE5D":blur_supported?"H BLUR READY - STAGE4A":"BYPASS ONLY - STAGE 1");
-        overlay_cursor(0,1);overlay_printf("READ ONLY / NO SAVE");
+        overlay_clear();overlay_cursor(0,0);overlay_printf("%s",scan_supported?"CRT SAVE - STAGE5E":blur_supported?"H BLUR READY - STAGE4A":"BYPASS ONLY - STAGE 1");
+        overlay_cursor(0,1);overlay_printf("SAVE: %s",save_failed?"FAILED":settings!=persisted?"UNSAVED":saved_user?"SAVED":"RECOMMENDED");
         overlay_cursor(0,2);overlay_printf("INITIAL: %s",restored.override_value.present?"USER":initial_from_csv?"CSV":"DEFAULT");
         overlay_cursor(0,3);overlay_printf("%s %s",blur_supported?"CRT ENABLE  ":"CRT REQUEST ",settings.enabled?"ON":"OFF");
         overlay_cursor(0,4);overlay_printf("%s %s",blur_supported?"H BLUR      ":"H BLUR REQ  ",strength(settings.blur));
@@ -40,17 +43,25 @@ struct CrtMenu:Menu {
         overlay_cursor(0,8);if(identity.valid)overlay_printf("ROM ID: %08lx",static_cast<unsigned long>(identity.crc));
         else overlay_printf("ROM ID: UNAVAILABLE");
         overlay_cursor(0,9);overlay_printf("CLOSE");
+        if(save_failed){overlay_cursor(0,10);overlay_printf("LEAVE UNSAVED");}
     }
-    std::vector<int> get_options()override{if(blur_supported&&!scan_supported)return {3,4,9};return {3,4,5,9};}
+    std::vector<int> get_options()override{if(blur_supported&&!scan_supported)return save_failed?std::vector<int>{3,4,9,10}:std::vector<int>{3,4,9};return save_failed?std::vector<int>{3,4,5,9,10}:std::vector<int>{3,4,5,9};}
     bool on_adjust(int row,int delta)override {
         if(row==0)settings.enabled=!settings.enabled;
         else if(row==1)settings.blur=(settings.blur+(delta>0?1:3))%4;
         else if(row==2&&(!blur_supported||scan_supported))settings.scanline=(settings.scanline+(delta>0?1:3))%4;
         else return false;
-        matched=false;send_settings();return true;
+        save_failed=false;matched=false;send_settings();return true;
+    }
+    bool on_close()override {
+        if(settings==persisted||!save_callback){save_failed=false;return true;}
+        if(!save_callback(identity,settings)){save_failed=true;redraw=true;return false;}
+        persisted=settings;saved_user=true;save_failed=false;return true;
     }
     bool on_choose(int row)override {
-        if(row==((blur_supported&&!scan_supported)?2:3)){overlay(0);return true;}
+        const int close_row=(blur_supported&&!scan_supported)?2:3;
+        if(save_failed&&row==close_row+1){save_failed=false;overlay(0);return true;}
+        if(row==close_row){if(!on_close())return false;overlay(0);return true;}
         on_adjust(row,1);redraw=true;return false;
     }
     bool inline_choice(int row)const override{return row<((blur_supported&&!scan_supported)?2:3);}
@@ -69,14 +80,15 @@ struct CrtMenu:Menu {
     }
 };
 }
-void ui16_crt_new_session(const Ui16CrtRecommendation &recommended,const Ui16RomIdentity &rom_id,const Ui16CrtRestore &restore){
-    identity=rom_id;
+void ui16_crt_new_session(const Ui16CrtRecommendation &recommended,const Ui16RomIdentity &rom_id,const Ui16CrtRestore &restore,Ui16CrtSaveFn save){
+    identity=rom_id;save_callback=save;save_failed=false;
     restored=restore;
     if(!identity.valid||!restore.override_value.present||restore.override_value.settings.blur>3||restore.override_value.settings.scanline>3||
        (restore.state!=Ui16CrtReadState::User&&restore.state!=Ui16CrtReadState::Recovered))restored.override_value={};
     initial_from_csv=recommended.present&&recommended.settings.blur<=3&&recommended.settings.scanline<=3;
     settings=initial_from_csv?recommended.settings:Ui16CrtSettings{};
     if(restored.override_value.present)settings=restored.override_value.settings;
+    persisted=settings;saved_user=restored.override_value.present;
     send_settings();
 }
 void ui16_crt_accept_status(std::uint32_t applied) {

@@ -56,6 +56,8 @@ Ui16CrtRestore ui16_read_crt_override(const Ui16RomIdentity &id,FIL &file,void *
     const bool bad=states[0]==Read::Bad||states[1]==Read::Bad;
     if(best<0){result.state=bad?Ui16CrtReadState::Bad:Ui16CrtReadState::Missing;return result;}
     const auto &r=records[best];const bool user=r[6]==0;
+    result.selected_slot=best;
+    result.generation=static_cast<std::uint32_t>(number(r,24,4));
     result.state=bad?Ui16CrtReadState::Recovered:user?Ui16CrtReadState::User:Ui16CrtReadState::Reset;
     if(user)result.override_value={true,{bool(r[20]&1),unsigned((r[20]>>1)&3),unsigned((r[20]>>3)&3)}};
     return result;

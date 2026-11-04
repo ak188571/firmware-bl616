@@ -13,6 +13,7 @@ struct Menu {
         redraw = true;
     }
     virtual ~Menu() = default;
+    virtual bool on_close() {return true;}
     virtual bool on_adjust(int,int) {return false;}
     virtual bool on_tick(std::uint32_t) {return false;}
     virtual int osd_width() const {return 0;}
