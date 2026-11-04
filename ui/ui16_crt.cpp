@@ -42,10 +42,9 @@ struct CrtMenu:Menu {
         overlay_cursor(0,7);overlay_printf("APPLY: %s",matched?"FRAME ACK":"WAITING");
         overlay_cursor(0,8);if(identity.valid)overlay_printf("ROM ID: %08lx",static_cast<unsigned long>(identity.crc));
         else overlay_printf("ROM ID: UNAVAILABLE");
-        overlay_cursor(0,9);overlay_printf("CLOSE");
-        if(save_failed){overlay_cursor(0,10);overlay_printf("LEAVE UNSAVED");}
+        overlay_cursor(0,9);overlay_printf("SAVE (X/Y: CANCEL)");
     }
-    std::vector<int> get_options()override{if(blur_supported&&!scan_supported)return save_failed?std::vector<int>{3,4,9,10}:std::vector<int>{3,4,9};return save_failed?std::vector<int>{3,4,5,9,10}:std::vector<int>{3,4,5,9};}
+    std::vector<int> get_options()override{if(blur_supported&&!scan_supported)return {3,4,9};return {3,4,5,9};}
     bool on_adjust(int row,int delta)override {
         if(row==0)settings.enabled=!settings.enabled;
         else if(row==1)settings.blur=(settings.blur+(delta>0?1:3))%4;
@@ -54,14 +53,17 @@ struct CrtMenu:Menu {
         save_failed=false;matched=false;send_settings();return true;
     }
     bool on_close()override {
-        if(settings==persisted||!save_callback){save_failed=false;return true;}
-        if(!save_callback(identity,settings)){save_failed=true;redraw=true;return false;}
-        persisted=settings;saved_user=true;save_failed=false;return true;
+        // X/Y cancels this preview, including the live FPGA configuration.
+        if(settings!=persisted){settings=persisted;matched=false;send_settings();}
+        save_failed=false;return true;
     }
     bool on_choose(int row)override {
-        const int close_row=(blur_supported&&!scan_supported)?2:3;
-        if(save_failed&&row==close_row+1){save_failed=false;overlay(0);return true;}
-        if(row==close_row){if(!on_close())return false;overlay(0);return true;}
+        if(row==((blur_supported&&!scan_supported)?2:3)){
+            if(settings==persisted&&saved_user)save_failed=false;
+            else if(!save_callback||!save_callback(identity,settings))save_failed=true;
+            else {persisted=settings;saved_user=true;save_failed=false;}
+            redraw=true;return false; // SAVE never dismisses the OSD.
+        }
         on_adjust(row,1);redraw=true;return false;
     }
     bool inline_choice(int row)const override{return row<((blur_supported&&!scan_supported)?2:3);}

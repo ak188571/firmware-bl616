@@ -61,7 +61,7 @@ int main(){
     menu_clear();push_menu(std::move(menu));_overlay_on=1;at=0;boxes.clear();
     pads={0x84,0,0x200};
     ui16_osd_menu_input_loop(false,"CRT SETTINGS",true);
-    assert(!overlay_on()&&config==(preserved|0xf0000));
+    assert(!overlay_on()&&config==preserved); // X/Y discards the live preview.
     menu_clear();push_menu(std::make_unique<DefaultMenu>());_overlay_on=1;at=0;boxes.clear();
     pads={0x20,0,0x80,0,0x200};
     ui16_osd_menu_input_loop(true,"SYSTEM",true);
@@ -81,7 +81,7 @@ int main(){
     assert(std::string(blur_cells.data(),32).find("H BLUR READY")!=std::string::npos);
     assert(std::string(blur_cells.data()+5*32,32).find("NOT YET")!=std::string::npos);
     assert(std::string(blur_cells.data()+7*32,32).find("FRAME ACK")!=std::string::npos);
-    assert(blur_menu->on_choose(2)&&!overlay_on());
+    _overlay_on=1;assert(!blur_menu->on_choose(2)&&overlay_on());
     ui16_crt_new_session();assert(config==preserved);
     std::unique_ptr<Menu> scan_menu(ui16_create_crt_menu(true,true));
     assert((scan_menu->get_options()==std::vector<int>{3,4,5,9}));
@@ -97,7 +97,7 @@ int main(){
     assert(std::string(scan_cells.data(),32).find("CRT SAVE - STAGE5E")!=std::string::npos);
     assert(std::string(scan_cells.data()+5*32,32).find("STRONG")!=std::string::npos);
     assert(std::string(scan_cells.data()+7*32,32).find("FRAME ACK")!=std::string::npos);
-    assert(scan_menu->on_choose(3)&&!overlay_on());
+    assert(!scan_menu->on_choose(3)&&overlay_on());
     ui16_crt_new_session();assert(config==preserved);
     // A lost transfer must recover without another controller operation.
     now=1000;ui16_crt_new_session();
@@ -126,7 +126,7 @@ int main(){
     assert(std::string(ui16_osd_canvas().cells.data()+7*32,32).find("WAITING")!=std::string::npos);
     ui16_crt_accept_status(config);assert(preset_menu->on_tick(3010));
     assert(preset_menu->on_adjust(1,1));const auto edited=config;
-    assert(preset_menu->on_choose(3));
+    assert(!preset_menu->on_choose(3));
     preset_menu.reset(ui16_create_crt_menu(true,true));
     assert(config==edited); // The initial preset is not reapplied on menu creation.
     ui16_crt_new_session();assert(config==preserved); // A different game with no CSV is OFF.
@@ -143,7 +143,7 @@ int main(){
     ui16_crt_new_session(recommended,rom_id);
     ui16_osd_capture_begin();preset_menu->render();ui16_osd_capture_end();
     assert(std::string(ui16_osd_canvas().cells.data()+8*32,32).find("ROM ID: abcdef01")!=std::string::npos);
-    assert(preset_menu->on_choose(3));preset_menu.reset(ui16_create_crt_menu(true,true));
+    assert(!preset_menu->on_choose(3));preset_menu.reset(ui16_create_crt_menu(true,true));
     ui16_osd_capture_begin();preset_menu->render();ui16_osd_capture_end();
     assert(std::string(ui16_osd_canvas().cells.data()+8*32,32).find("abcdef01")!=std::string::npos);
     ui16_crt_new_session(recommended);assert(config==recommended.settings.merge(preserved));
@@ -155,36 +155,43 @@ int main(){
     assert(std::string(ui16_osd_canvas().cells.data()+2*32,32).find("INITIAL: USER")!=std::string::npos);
     assert(std::string(ui16_osd_canvas().cells.data()+6*32,32).find("STORE: USER")!=std::string::npos);
     assert(preset_menu->on_adjust(1,1));const auto restored_edit=config;
-    assert(preset_menu->on_choose(3));preset_menu.reset(ui16_create_crt_menu(true,true));assert(config==restored_edit);
+    assert(!preset_menu->on_choose(3));preset_menu.reset(ui16_create_crt_menu(true,true));assert(config==restored_edit);
     ui16_crt_new_session(recommended,rom_id,{Ui16CrtReadState::Reset,{}});assert(config==recommended.settings.merge(preserved));
     ui16_crt_new_session({},rom_id,saved);assert(config==saved.override_value.settings.merge(preserved));
     ui16_crt_new_session(recommended,{},saved);assert(config==recommended.settings.merge(preserved));
     ui16_crt_new_session(recommended,rom_id,{Ui16CrtReadState::Bad,saved.override_value});assert(config==recommended.settings.merge(preserved));
     ui16_crt_new_session(recommended,rom_id,{Ui16CrtReadState::User,{true,{true,4,1}}});assert(config==recommended.settings.merge(preserved));
     ui16_crt_new_session(recommended,rom_id,{},save_test);
-    preset_menu.reset(ui16_create_crt_menu(true,true));saves=0;
-    assert(preset_menu->on_close()&&saves==0); // Clean close never writes.
-    assert(preset_menu->on_adjust(1,1));assert(preset_menu->on_close()&&saves==1);
-    assert(saved_value==Ui16CrtSettings({true,2,2}));
+    preset_menu.reset(ui16_create_crt_menu(true,true));saves=0;_overlay_on=1;
+    assert(preset_menu->on_adjust(1,1));assert(preset_menu->on_close()&&saves==0);
+    assert(config==recommended.settings.merge(preserved)); // Discard restores actual video settings.
+    assert(!preset_menu->on_choose(3)&&saves==1&&overlay_on()); // Explicitly pin even an unchanged recommendation.
+    assert(saved_value==recommended.settings);
+    assert(!preset_menu->on_choose(3)&&saves==1); // Unchanged saved value causes no extra write.
+    assert(preset_menu->on_adjust(1,1));assert(!preset_menu->on_choose(3)&&saves==2&&overlay_on());
+    const auto successful=config;
     ui16_osd_capture_begin();preset_menu->render();ui16_osd_capture_end();
     assert(std::string(ui16_osd_canvas().cells.data()+32,32).find("SAVE: SAVED")!=std::string::npos);
-    assert(preset_menu->on_close()&&saves==1);
     assert(preset_menu->on_adjust(2,1));save_ok=false;
-    assert(!preset_menu->on_close()&&saves==2&&preset_menu->get_options().back()==10);
+    assert(!preset_menu->on_choose(3)&&saves==3&&overlay_on());
+    assert((preset_menu->get_options()==std::vector<int>{3,4,5,9}));
     ui16_osd_capture_begin();preset_menu->render();ui16_osd_capture_end();
     assert(std::string(ui16_osd_canvas().cells.data()+32,32).find("SAVE: FAILED")!=std::string::npos);
-    save_ok=true;assert(preset_menu->on_close()&&saves==3);
-    assert(preset_menu->on_adjust(1,1));save_ok=false;assert(!preset_menu->on_choose(3));
-    assert(preset_menu->on_choose(4)); // Explicit leave without successful persistence.
-    preset_menu.reset(ui16_create_crt_menu(true,true));save_ok=true;assert(preset_menu->on_close());
-    // The real X/Y path must veto close on failure, not bypass the save hook.
-    ui16_crt_new_session(recommended,rom_id,{},save_test);save_ok=false;
-    auto failing=std::unique_ptr<Menu>(ui16_create_crt_menu(true,true));assert(failing->on_adjust(1,1));
-    menu_clear();push_menu(std::move(failing));_overlay_on=1;at=0;
-    const auto before_failed_back=saves;
-    pads={0x200,0,0x20,0,0x20,0,0x20,0,0x20,0,0x100,0};
-    ui16_osd_menu_input_loop(false,"CRT SETTINGS",true);
-    assert(!overlay_on()&&saves==before_failed_back+1);menu_clear();save_ok=true;
+    save_ok=true;assert(!preset_menu->on_choose(3)&&saves==4&&overlay_on()); // Retry stays open too.
+    const auto retry_saved=config;
+    assert(preset_menu->on_adjust(1,1));assert(config!=retry_saved);
+    assert(preset_menu->on_close()&&saves==4&&config==retry_saved);
+    assert(retry_saved!=successful);
+    // Actual X and Y input paths cancel without invoking storage, even after a failed SAVE.
+    for(unsigned back:{0x200u,0x2u}){
+        ui16_crt_new_session(recommended,rom_id,{},save_test);save_ok=false;
+        auto failing=std::unique_ptr<Menu>(ui16_create_crt_menu(true,true));assert(failing->on_adjust(1,1));
+        assert(!failing->on_choose(3));const auto before_back=saves;
+        menu_clear();push_menu(std::move(failing));_overlay_on=1;at=0;pads={static_cast<std::uint16_t>(back)};
+        ui16_osd_menu_input_loop(false,"CRT SETTINGS",true);
+        assert(!overlay_on()&&saves==before_back&&config==recommended.settings.merge(preserved));menu_clear();
+    }
+    save_ok=true;
     assert(critical_depth==0);
-    std::puts("CRT host PASS: hotkeys, preserved config, frame ACK/retry, stale ACK rejection, CSV/default/explicit OFF seeds, invalid seed fallback, same-game edits and per-launch reset");
+    std::puts("CRT host PASS: hotkeys, preserved config, frame ACK/retry, stale ACK rejection, CSV/default/explicit OFF seeds, invalid seed fallback, explicit SAVE/stay-open/retry and X/Y discard of live preview");
 }
