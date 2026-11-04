@@ -38,12 +38,18 @@ struct FIL{};static FIL fcore;
 constexpr unsigned BLOCK_SIZE=8192;
 static unsigned char fbuf[BLOCK_SIZE];
 static unsigned identify_calls=0,rom_calls=0;
+static unsigned restore_calls=0;
 static bool identify_ok=true;
 static std::vector<std::string> io_order;
 Ui16RomIdentity ui16_identify_rom(int system,const char *path,FIL &file,void *buffer,unsigned capacity,void (*yield)()){
  assert(system==1&& &file==&fcore&&buffer==fbuf&&capacity==BLOCK_SIZE&&!core_running);
  ++identify_calls;io_order.push_back(std::string("identify:")+path);if(yield)yield();
  return identify_ok?Ui16RomIdentity{true,Ui16RomVolume::Sd,1,0xabcdef01,65552}:Ui16RomIdentity{};
+}
+Ui16CrtRestore ui16_read_crt_override(const Ui16RomIdentity &identity,FIL &file,void *buffer,unsigned capacity){
+ assert(&file==&fcore&&buffer==fbuf&&capacity==BLOCK_SIZE&&!core_running);
+ ++restore_calls;io_order.push_back("restore");
+ return identity.valid?Ui16CrtRestore{Ui16CrtReadState::User,{true,{true,3,3}}}:Ui16CrtRestore{};
 }
 void overlay_status(const char *,...){}
 static int tx_done=0,uart_device=0;
@@ -78,8 +84,9 @@ void fpga_tx_byte(unsigned char b){bytes.push_back(b);}
 static unsigned session_calls=0,releases=0;
 static Ui16CrtRecommendation captured;
 static Ui16RomIdentity captured_id;
+static Ui16CrtRestore captured_restore;
 void ui16_wait_release(){++releases;}
-void ui16_crt_new_session(const Ui16CrtRecommendation &value,const Ui16RomIdentity &identity){++session_calls;captured=value;captured_id=identity;}
+void ui16_crt_new_session(const Ui16CrtRecommendation &value,const Ui16RomIdentity &identity,const Ui16CrtRestore &restore){++session_calls;captured=value;captured_id=identity;captured_restore=restore;}
 struct FakeLaunch {
  Ui16LaunchError result;
  Ui16LaunchError launch(const char *,const Ui16LaunchTarget &,const Ui16LaunchRequest &){return result;}
@@ -101,12 +108,14 @@ int main(){
  result=1;assert(!ui16_hw_load_rom(1,"x",nullptr)&&!core_running);
  result=0;started=false;assert(!ui16_hw_load_rom(1,"x",nullptr)); // Includes SNES invalid-header return-0 case.
  assert(!ui16_hw_load_rom(999,"x",nullptr));
- assert(identify_calls==0&&!crt_rom_identity.valid); // Unsupported cores have no extra file access.
+ assert(identify_calls==0&&restore_calls==0&&!crt_rom_identity.valid); // Unsupported cores have no extra file access.
  crt_stage1_capable=true;started=true;result=0;io_order.clear();
  assert(ui16_hw_load_rom(1,"sd:nes/id.nes",nullptr)&&crt_rom_identity.valid);
- assert((io_order==std::vector<std::string>{"identify:sd:nes/id.nes","rom"}));
+ assert((io_order==std::vector<std::string>{"identify:sd:nes/id.nes","restore","rom"}));
+ assert(crt_restore.override_value.present);
  identify_ok=false;const auto before_loads=rom_calls;
  assert(ui16_hw_load_rom(1,"sd:nes/noid.nes",nullptr)&&!crt_rom_identity.valid&&rom_calls==before_loads+1);
+ assert(!crt_restore.override_value.present);
  identify_ok=true;result=1;assert(!ui16_hw_load_rom(1,"x",nullptr)&&!crt_rom_identity.valid);
  result=0;crt_stage1_capable=false;
  ui16_hw_display_owner(true,nullptr);assert(owner&&overlay_on());
@@ -140,6 +149,7 @@ int main(){
  crt_rom_identity={true,Ui16RomVolume::Sd,1,0xabcdef01,65552};
  launch_handoff(Ui16LaunchError::None,Ui16LaunchRequest{1,"","other.nes"});assert(session_calls==2&&!captured.present);
  assert(captured_id.same_game(crt_rom_identity));
+ crt_restore={Ui16CrtReadState::User,{true,{true,3,3}}};launch_handoff(Ui16LaunchError::None,seeded);assert(captured_restore.override_value.present);
  std::puts("Actual main.cpp adapters passed: stat/program/ID timeout/load state, display ownership, unmodified X/Y game HID, OSD chord, neutral packets");
 }
 '''
@@ -223,6 +233,7 @@ bool ui16_hw_starting(void *);
 void overlay_osd_window(unsigned,unsigned,unsigned,unsigned);
 extern bool crt_stage1_capable;
 extern Ui16RomIdentity crt_rom_identity;
+extern Ui16CrtRestore crt_restore;
 static bool crt_blur_capable=false,crt_scanline_capable=false;
 extern Ui16GameOsd game_osd_owner;
 void delay(unsigned);

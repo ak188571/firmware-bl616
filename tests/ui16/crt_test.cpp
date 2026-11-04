@@ -91,7 +91,7 @@ int main(){
     ui16_crt_accept_status(config);assert(scan_menu->on_tick(30));
     ui16_osd_capture_begin();scan_menu->render();ui16_osd_capture_end();
     const auto &scan_cells=ui16_osd_canvas().cells;
-    assert(std::string(scan_cells.data(),32).find("CRT ROM ID - STAGE5C")!=std::string::npos);
+    assert(std::string(scan_cells.data(),32).find("CRT RESTORE - STAGE5D")!=std::string::npos);
     assert(std::string(scan_cells.data()+5*32,32).find("STRONG")!=std::string::npos);
     assert(std::string(scan_cells.data()+7*32,32).find("FRAME ACK")!=std::string::npos);
     assert(scan_menu->on_choose(3)&&!overlay_on());
@@ -146,6 +146,18 @@ int main(){
     ui16_crt_new_session(recommended);assert(config==recommended.settings.merge(preserved));
     ui16_osd_capture_begin();preset_menu->render();ui16_osd_capture_end();
     assert(std::string(ui16_osd_canvas().cells.data()+8*32,32).find("UNAVAILABLE")!=std::string::npos);
+    const Ui16CrtRestore saved{Ui16CrtReadState::User,{true,{true,3,3}}};
+    ui16_crt_new_session(recommended,rom_id,saved);assert(config==saved.override_value.settings.merge(preserved));
+    ui16_osd_capture_begin();preset_menu->render();ui16_osd_capture_end();
+    assert(std::string(ui16_osd_canvas().cells.data()+2*32,32).find("INITIAL: USER")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+6*32,32).find("STORE: USER")!=std::string::npos);
+    assert(preset_menu->on_adjust(1,1));const auto restored_edit=config;
+    assert(preset_menu->on_choose(3));preset_menu.reset(ui16_create_crt_menu(true,true));assert(config==restored_edit);
+    ui16_crt_new_session(recommended,rom_id,{Ui16CrtReadState::Reset,{}});assert(config==recommended.settings.merge(preserved));
+    ui16_crt_new_session({},rom_id,saved);assert(config==saved.override_value.settings.merge(preserved));
+    ui16_crt_new_session(recommended,{},saved);assert(config==recommended.settings.merge(preserved));
+    ui16_crt_new_session(recommended,rom_id,{Ui16CrtReadState::Bad,saved.override_value});assert(config==recommended.settings.merge(preserved));
+    ui16_crt_new_session(recommended,rom_id,{Ui16CrtReadState::User,{true,{true,4,1}}});assert(config==recommended.settings.merge(preserved));
     assert(critical_depth==0);
     std::puts("CRT host PASS: hotkeys, preserved config, frame ACK/retry, stale ACK rejection, CSV/default/explicit OFF seeds, invalid seed fallback, same-game edits and per-launch reset");
 }
