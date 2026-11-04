@@ -45,6 +45,7 @@ extern "C" {
 #include "ui16_rom_id_reader.h"
 #include "ui16_crt_restore_reader.h"
 #include "ui16_crt_save.h"
+#include "ui16_crt_defaults_reader.h"
 #ifdef UI16_SD_FONT
 #include "ui16_font_cache.h"
 #ifdef UI16_RELIABLE_FONT
@@ -511,6 +512,7 @@ static bool ui16_hw_osd_ready(void *)
 // UI16 launch adapters BEGIN (host-tested with hardware substitutes)
 static Ui16RomIdentity crt_rom_identity;
 static Ui16CrtRestore crt_restore;
+static Ui16CrtDefaults crt_defaults;
 // Only the validated NES path owns these resources without background disk I/O.
 static bool ui16_hw_save_crt(const Ui16RomIdentity &identity,const Ui16CrtSettings &value,bool reset=false){
     if(!core_running||active_core!=1||!crt_stage1_capable||identity.system!=1)return false;
@@ -528,7 +530,7 @@ static bool ui16_hw_find_core(const char *name,std::string &path,void *)
 static bool ui16_hw_program(const char *path,void *)
 {
     core_running=false;active_core=-1;
-    crt_rom_identity={};crt_restore={};
+    crt_rom_identity={};crt_restore={};crt_defaults={};
     extern bool gba_bios_loaded,gba_missing_bios_warned;
     gba_bios_loaded=false;gba_missing_bios_warned=false;
     const bool ok=fpga_program(path);
@@ -551,7 +553,7 @@ static bool ui16_hw_load_rom(int id,const char *path,void *)
 {
     auto *target=find_core_by_id(id);
     core_running=false;
-    crt_rom_identity={};crt_restore={};
+    crt_rom_identity={};crt_restore={};crt_defaults={};
     if(!target||!target->load_rom)return false;
     if(crt_stage1_capable){
         overlay_status("Reading ROM ID...");
@@ -559,9 +561,10 @@ static bool ui16_hw_load_rom(int id,const char *path,void *)
         // sequentially; identify_rom closes the read-only file before load_rom.
         crt_rom_identity=ui16_identify_rom(id,path,fcore,fbuf,BLOCK_SIZE,[](){delay(1);});
         crt_restore=ui16_read_crt_override(crt_rom_identity,fcore,fbuf,BLOCK_SIZE);
+        crt_defaults=ui16_read_crt_defaults(id,path,fcore,fbuf,BLOCK_SIZE);
     }
     const int result=target->load_rom(path);
-    if(result!=0||!core_running){core_running=false;crt_rom_identity={};crt_restore={};return false;}
+    if(result!=0||!core_running){core_running=false;crt_rom_identity={};crt_restore={};crt_defaults={};return false;}
     overlay(0);return true;
 }
 static void ui16_hw_display_owner(bool ui16,void *)
@@ -714,7 +717,7 @@ static void main_task(void *pvParameters)
                 if(error==Ui16LaunchError::None){
                     // Preserve normal game input; the UI button assignment is not a game remap.
                     ui16_wait_release();
-                    if(crt_stage1_capable)ui16_crt_new_session(request.crt_recommendation,crt_rom_identity,crt_restore,ui16_hw_save_crt);
+                    if(crt_stage1_capable)ui16_crt_new_session(request.crt_recommendation,crt_rom_identity,crt_restore,ui16_hw_save_crt,crt_defaults);
                     for(;;){
                         overlay(0);send_hid_to_core();
                         ui16_wait_release();overlay_osd_window(0,0,0,0);overlay(1);

@@ -5,7 +5,8 @@
 
 namespace {
 Ui16CrtSettings settings;
-bool initial_from_csv=false;
+const char *recommended_source="DEFAULT";
+Ui16CrtDefaults defaults_snapshot;
 Ui16RomIdentity identity;
 Ui16CrtRestore restored;
 Ui16CrtSettings persisted,session_recommended;
@@ -32,9 +33,9 @@ struct CrtMenu:Menu {
     bool matched=false;
     int osd_width()const override{return 23;}
     void render()override {
-        overlay_clear();overlay_cursor(0,0);overlay_printf("%s",scan_supported?"CRT RESET - STAGE5F":blur_supported?"H BLUR READY - STAGE4A":"BYPASS ONLY - STAGE 1");
+        overlay_clear();overlay_cursor(0,0);overlay_printf("%s",scan_supported?"CRT DEFAULTS - STAGE5G":blur_supported?"H BLUR READY - STAGE4A":"BYPASS ONLY - STAGE 1");
         overlay_cursor(0,1);overlay_printf("SAVE: %s",save_failed?"FAILED":dirty()?"UNSAVED":(saved_user||persisted_reset)?"SAVED":"RECOMMENDED");
-        overlay_cursor(0,2);overlay_printf("INITIAL: %s",restored.override_value.present?"USER":initial_from_csv?"CSV":"DEFAULT");
+        overlay_cursor(0,2);overlay_printf("INITIAL: %s",restored.override_value.present?"USER":recommended_source);
         overlay_cursor(0,3);overlay_printf("%s %s",blur_supported?"CRT ENABLE  ":"CRT REQUEST ",settings.enabled?"ON":"OFF");
         overlay_cursor(0,4);overlay_printf("%s %s",blur_supported?"H BLUR      ":"H BLUR REQ  ",strength(settings.blur));
         overlay_cursor(0,5);if(scan_supported)overlay_printf("SCANLINE     %s",strength(settings.scanline));
@@ -46,6 +47,7 @@ struct CrtMenu:Menu {
         else overlay_printf("ROM ID: UNAVAILABLE");
         overlay_cursor(0,9);overlay_printf("SAVE (X/Y: CANCEL)");
         overlay_cursor(0,10);overlay_printf("RESET TO RECOMMENDED");
+        overlay_cursor(0,11);overlay_printf("DEFAULTS: %s",ui16_crt_defaults_state_name(defaults_snapshot.state));
     }
     std::vector<int> get_options()override{if(blur_supported&&!scan_supported)return {3,4,9,10};return {3,4,5,9,10};}
     bool on_adjust(int row,int delta)override {
@@ -90,13 +92,22 @@ struct CrtMenu:Menu {
     }
 };
 }
-void ui16_crt_new_session(const Ui16CrtRecommendation &recommended,const Ui16RomIdentity &rom_id,const Ui16CrtRestore &restore,Ui16CrtSaveFn save){
+void ui16_crt_new_session(const Ui16CrtRecommendation &recommended,const Ui16RomIdentity &rom_id,const Ui16CrtRestore &restore,Ui16CrtSaveFn save,const Ui16CrtDefaults &defaults){
     identity=rom_id;save_callback=save;save_failed=false;
     restored=restore;
     if(!identity.valid||!restore.override_value.present||restore.override_value.settings.blur>3||restore.override_value.settings.scanline>3||
        (restore.state!=Ui16CrtReadState::User&&restore.state!=Ui16CrtReadState::Recovered))restored.override_value={};
-    initial_from_csv=recommended.present&&recommended.settings.blur<=3&&recommended.settings.scanline<=3;
-    session_recommended=initial_from_csv?recommended.settings:Ui16CrtSettings{};
+    defaults_snapshot=defaults;
+    recommended_source="DEFAULT";session_recommended={};
+    if(defaults.state==Ui16CrtDefaultsState::Ready&&defaults.recommendation.present&&
+       defaults.recommendation.settings.blur<=3&&defaults.recommendation.settings.scanline<=3&&
+       (defaults.source==Ui16CrtDefaultsSource::System||defaults.source==Ui16CrtDefaultsSource::Global)){
+        session_recommended=defaults.recommendation.settings;
+        recommended_source=defaults.source==Ui16CrtDefaultsSource::System?"SYSTEM":"GLOBAL";
+    }
+    if(recommended.present&&recommended.settings.blur<=3&&recommended.settings.scanline<=3){
+        session_recommended=recommended.settings;recommended_source="CSV";
+    }
     settings=session_recommended;
     if(restored.override_value.present)settings=restored.override_value.settings;
     persisted=settings;saved_user=restored.override_value.present;

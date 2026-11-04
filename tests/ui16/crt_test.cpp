@@ -94,7 +94,7 @@ int main(){
     ui16_crt_accept_status(config);assert(scan_menu->on_tick(30));
     ui16_osd_capture_begin();scan_menu->render();ui16_osd_capture_end();
     const auto &scan_cells=ui16_osd_canvas().cells;
-    assert(std::string(scan_cells.data(),32).find("CRT RESET - STAGE5F")!=std::string::npos);
+    assert(std::string(scan_cells.data(),32).find("CRT DEFAULTS - STAGE5G")!=std::string::npos);
     assert(std::string(scan_cells.data()+5*32,32).find("STRONG")!=std::string::npos);
     assert(std::string(scan_cells.data()+7*32,32).find("FRAME ACK")!=std::string::npos);
     assert(!scan_menu->on_choose(3)&&overlay_on());
@@ -230,6 +230,33 @@ int main(){
         assert(!overlay_on()&&saves==writes_before_cancel&&config==saved.override_value.settings.merge(preserved));menu_clear();
     }
     save_ok=true;
+    // Lower-priority recommendations are atomic snapshots, overridden by CSV then USER.
+    const Ui16CrtDefaults system_defaults{Ui16CrtDefaultsState::Ready,Ui16CrtDefaultsSource::System,{true,{true,2,1}}};
+    const Ui16CrtDefaults global_defaults{Ui16CrtDefaultsState::Ready,Ui16CrtDefaultsSource::Global,{true,{true,1,3}}};
+    ui16_crt_new_session({},rom_id,{},save_test,system_defaults);assert(config==system_defaults.recommendation.settings.merge(preserved));
+    ui16_osd_capture_begin();preset_menu->render();ui16_osd_capture_end();
+    assert(std::string(ui16_osd_canvas().cells.data()+2*32,32).find("INITIAL: SYSTEM")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+11*32,32).find("DEFAULTS: OK")!=std::string::npos);
+    ui16_crt_new_session({},rom_id,{Ui16CrtReadState::Reset,{},0,3},save_test,global_defaults);
+    assert(config==global_defaults.recommendation.settings.merge(preserved));
+    ui16_crt_new_session(recommended,rom_id,{},save_test,system_defaults);assert(config==recommended.settings.merge(preserved));
+    ui16_crt_new_session(recommended,rom_id,saved,save_test,system_defaults);assert(config==saved.override_value.settings.merge(preserved));
+    assert(!preset_menu->on_choose(4));assert(config==recommended.settings.merge(preserved));
+    assert(preset_menu->on_close()&&config==saved.override_value.settings.merge(preserved));
+    ui16_crt_new_session({},rom_id,saved,save_test,system_defaults);assert(!preset_menu->on_choose(4));
+    assert(config==system_defaults.recommendation.settings.merge(preserved));
+    assert(!preset_menu->on_choose(3)&&saved_reset); // Reset saves mode, not defaults numeric values.
+    ui16_crt_new_session({},rom_id,{Ui16CrtReadState::Reset,{},1,4},save_test,global_defaults);
+    assert(config==global_defaults.recommendation.settings.merge(preserved)); // A changed defaults file follows on next launch.
+    ui16_crt_new_session({true,{false,0,0}},rom_id,{},save_test,system_defaults);assert(config==preserved);
+    auto broken_defaults=system_defaults;broken_defaults.state=Ui16CrtDefaultsState::Bad;
+    ui16_crt_new_session({},rom_id,{},save_test,broken_defaults);assert(config==preserved);
+    ui16_osd_capture_begin();preset_menu->render();ui16_osd_capture_end();
+    assert(std::string(ui16_osd_canvas().cells.data()+11*32,32).find("BAD FILE")!=std::string::npos);
+    ui16_crt_new_session(recommended,rom_id,saved,save_test,broken_defaults);assert(config==saved.override_value.settings.merge(preserved));
+    assert(!preset_menu->on_choose(4)&&config==recommended.settings.merge(preserved));
+    broken_defaults=system_defaults;broken_defaults.recommendation.settings.blur=4;
+    ui16_crt_new_session({},rom_id,{},save_test,broken_defaults);assert(config==preserved);
     assert(critical_depth==0);
     std::puts("CRT host PASS: hotkeys, preserved config, frame ACK/retry, stale ACK rejection, CSV/default/explicit OFF seeds, invalid seed fallback, explicit SAVE/stay-open/retry and X/Y discard of live preview");
 }
