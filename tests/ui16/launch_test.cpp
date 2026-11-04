@@ -37,7 +37,7 @@ struct Fake {
 static Ui16GameList data;
 static Ui16GameList loader(int,const char *path,void *){
     if(!*path)return data;
-    Ui16GameList g;g.status=Ui16ListStatus::Ready;g.names={"Real_Name.NES"};g.titles={u8"日本\nゲーム"};g.directories={false};return g;
+    Ui16GameList g;g.status=Ui16ListStatus::Ready;g.names={"Real_Name.NES"};g.titles={u8"日本\nゲーム"};g.directories={false};g.crt_recommendations={{true,{true,1,2}}};return g;
 }
 int main(){
     const Ui16LaunchTarget target{1,"nes","nestang.bin"};
@@ -100,6 +100,7 @@ int main(){
     const int top=browser.file_top();assert(top>0);
     tap(0x0001);assert(browser.relative_path()=="action"&&!browser.take_launch_request(request));
     tap(0x0100|UI16_BUTTON_DOWN);assert(browser.take_launch_request(request)&&request.relative_path=="action"&&request.filename=="Real_Name.NES");
+    assert(request.crt_recommendation.present&&request.crt_recommendation.settings==Ui16CrtSettings({true,1,2}));
     assert(!browser.take_launch_request(request));
     browser.update(0x0101,time+=1000,loader);assert(!browser.take_launch_request(request));
     browser.resume_input(0x0100);browser.update(0x0100,time+=1000,loader);assert(!browser.take_launch_request(request));
@@ -111,5 +112,24 @@ int main(){
     tap(0x0102);assert(!browser.take_launch_request(request));
     tap(0x0200);assert(!browser.in_games());
     assert(std::string(ui16_launch_error_text(Ui16LaunchError::RomFailed))=="ROM LOAD ERROR");
-    std::puts("Stage 6 launch tests passed: original paths, single-shot A/B requests, preflight, program/ID/load ordering, failures/recovery/retry, ownership, nested mixed-height selection restore");
+    // Real CSV ordering -> browser selection -> value-owned request snapshot.
+    data={};data.status=Ui16ListStatus::Ready;data.names={"b.nes","dr.nes","off.nes"};data.directories={false,false,false};
+    const std::string csv="name\ttitle\tcrt_v1\ndr.nes\tDR\t1:1:2\nb.nes\tB\t\noff.nes\tOFF\t0:0:0\n";
+    Ui16TitlesParser parser(data);assert(parser.feed(csv.data(),csv.size())&&parser.finish());
+    Ui16Browser presets(entries,1);unsigned clock=0;
+    auto choose=[&](unsigned key){presets.update(0,clock+=10,loader);return presets.update(key,clock+=10,loader);};
+    choose(0x0100);choose(0x0100);Ui16LaunchRequest dr;
+    assert(presets.take_launch_request(dr)&&dr.filename=="dr.nes");
+    assert(dr.crt_recommendation.present&&dr.crt_recommendation.settings==Ui16CrtSettings({true,1,2}));
+    choose(UI16_BUTTON_DOWN);choose(0x0100);assert(presets.take_launch_request(request)&&request.filename=="b.nes"&&!request.crt_recommendation.present);
+    choose(UI16_BUTTON_DOWN);choose(0x0100);assert(presets.take_launch_request(request)&&request.filename=="off.nes"&&request.crt_recommendation.present&&!request.crt_recommendation.settings.enabled);
+    assert(dr.filename=="dr.nes"&&dr.crt_recommendation.settings==Ui16CrtSettings({true,1,2}));
+    for(unsigned invalid=0;invalid<3;++invalid){
+        data.names={"only.nes"};data.directories={false};data.crt_recommendations={{true,{true,1,2}}};data.titles_error=invalid==0;
+        if(invalid==1)data.crt_recommendations.clear();
+        if(invalid==2)data.crt_recommendations.push_back({true,{true,3,3}});
+        Ui16Browser fallback(entries,1);fallback.update(0x0100,0,loader);fallback.update(0,10,loader);fallback.update(0x0100,20,loader);
+        assert(fallback.take_launch_request(request)&&!request.crt_recommendation.present);
+    }
+    std::puts("Launch tests passed: original paths, program/ID/load failures and recovery, CSV ordering/selected and nested preset snapshots, absent/invalid-list fallback, mixed-height selection restore");
 }

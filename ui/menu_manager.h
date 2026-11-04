@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <cstdint>
 #include <vector>
 #include "overlay.h"
 
@@ -12,9 +13,12 @@ struct Menu {
         redraw = true;
     }
     virtual ~Menu() = default;
+    virtual bool on_close() {return true;}
     virtual bool on_adjust(int,int) {return false;}
+    virtual bool on_tick(std::uint32_t) {return false;}
     virtual int osd_width() const {return 0;}
     virtual bool fullscreen_dialog(int) const {return false;}
+    virtual bool inline_choice(int) const {return false;}
     virtual void render() = 0;
     virtual std::vector<int> get_options() = 0;   // return list of choice rows
     virtual bool on_choose(int idx) = 0;          // called when a choice is selected

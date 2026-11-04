@@ -8,6 +8,8 @@ extern void leave_critical();
 #define taskEXIT_CRITICAL() leave_critical()
 void fpga_tx_header(int command,int length);
 void fpga_tx_byte(std::uint8_t byte);
+std::uint32_t get_core_config();
+void set_core_config(std::uint32_t);
 
 // Host declarations for the real UART send functions extracted from utils.cpp.
 struct bflb_device_s;

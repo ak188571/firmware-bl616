@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include "ui16_config.h"
+#include "ui16_crt_settings.h"
 
 inline constexpr int UI16_GAME_CAPACITY = 256;
 enum class Ui16ListStatus { Ready, Empty, DirectoryError, ReadError };
@@ -15,6 +16,7 @@ struct Ui16GameList {
     std::vector<bool> directories; // Parallel to names; classification comes from FatFs.
     bool navigation_error = false;
     const char *launch_error = nullptr; // Static error label supplied by Ui16Runtime.
+    std::vector<Ui16CrtRecommendation> crt_recommendations; // Parallel to names; absent means inherit.
 };
 
 bool ui16_is_rom_file(int core_id, const char *name);

@@ -16,7 +16,7 @@ struct Ui16OsdFrame {
 };
 const char *ui16_osd_position_name(Ui16OsdPosition);
 Ui16OsdFrame ui16_osd_layout(const Ui16OsdCanvas &,const std::vector<int> &options,
-    int selected,int &top,int &width_floor,Ui16OsdPosition position);
+    int selected,int &top,int &width_floor,Ui16OsdPosition position, bool movable=true, const char *title="MENU");
 void ui16_osd_capture_begin();
 void ui16_osd_capture_end();
 bool ui16_osd_capture_active();

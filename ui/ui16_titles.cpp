@@ -49,18 +49,23 @@ bool blank_title(std::string_view s) {
 }
 }
 Ui16TitlesParser::Ui16TitlesParser(Ui16GameList &games)
-    : games_(games),pending_(games.names.size()),seen_(games.names.size(),false) {}
+    : games_(games),pending_(games.names.size()),crt_pending_(games.names.size()),seen_(games.names.size(),false) {}
 bool Ui16TitlesParser::line() {
     if(!line_.empty()&&line_.back()=='\r')line_.pop_back();
     if(first_) {
         first_=false;
         if(line_.compare(0,3,"\xef\xbb\xbf")==0)line_.erase(0,3);
-        return line_=="name\ttitle";
+        crt_column_=line_=="name\ttitle\tcrt_v1";
+        return crt_column_||line_=="name\ttitle";
     }
     if(line_.empty())return true;
     const auto tab=line_.find('\t');
-    if(tab==std::string::npos||line_.find('\t',tab+1)!=std::string::npos)return false;
-    const std::string_view name(line_.data(),tab),title(line_.data()+tab+1,line_.size()-tab-1);
+    const auto third=line_.find('\t',tab==std::string::npos?0:tab+1);
+    if(tab==std::string::npos||(!crt_column_&&third!=std::string::npos)||
+       (crt_column_&&(third==std::string::npos||line_.find('\t',third+1)!=std::string::npos)))return false;
+    const std::string_view name(line_.data(),tab),title(line_.data()+tab+1,(crt_column_?third:line_.size())-tab-1);
+    Ui16CrtRecommendation recommendation;
+    if(crt_column_&&!ui16_parse_crt(std::string_view(line_).substr(third+1),recommendation))return false;
     if(name.empty()||name.size()>255||name.back()==' '||name.back()=='.'||title.size()>UI16_TITLE_MAX_BYTES||!valid_title(title))return false;
     std::string decoded;
     if(!ui16_decode_title(title,decoded))return false;
@@ -71,6 +76,8 @@ bool Ui16TitlesParser::line() {
         if(seen_[i])return false;
         seen_[i]=true;
         order_.push_back(i);
+        if(i<games_.directories.size()&&games_.directories[i]&&recommendation.present)return false;
+        crt_pending_[i]=recommendation;
         if(!blank_title(title)){
             const bool folder=i<games_.directories.size()&&games_.directories[i];
             if(!ui16_layout_text(decoded+(folder?"/":"")).valid)return false;
@@ -88,7 +95,7 @@ bool Ui16TitlesParser::feed(const char *data,std::size_t length) {
             line_.clear();
         } else {
             line_+=data[i];
-            if(line_.size()>769){failed_=true;break;}
+            if(line_.size()>(crt_column_?775u:769u)){failed_=true;break;}
         }
     }
     return !failed_;
@@ -102,6 +109,7 @@ bool Ui16TitlesParser::finish() {
     });
     order_.insert(order_.end(),remaining.begin(),remaining.end());
     std::vector<std::string> names,titles;
+    std::vector<Ui16CrtRecommendation> recommendations;
     names.reserve(order_.size());titles.reserve(order_.size());
     const bool have_directories=games_.directories.size()==games_.names.size();
     std::vector<bool> directories;
@@ -109,15 +117,17 @@ bool Ui16TitlesParser::finish() {
     for(auto index:order_) {
         names.push_back(std::move(games_.names[index]));
         titles.push_back(std::move(pending_[index]));
+        recommendations.push_back(crt_pending_[index]);
         if(have_directories)directories.push_back(games_.directories[index]);
     }
     games_.names=std::move(names);
     games_.titles=std::move(titles);
+    games_.crt_recommendations=std::move(recommendations);
     if(have_directories)games_.directories=std::move(directories);
     return true;
 }
 void ui16_load_titles(const char *path,Ui16GameList &games) {
-    games.titles.clear();games.titles_error=false;
+    games.titles.clear();games.crt_recommendations.clear();games.titles_error=false;
     if(games.status!=Ui16ListStatus::Ready)return;
     FIL file;
     const auto opened=f_open(&file,path,FA_READ);
@@ -132,6 +142,6 @@ void ui16_load_titles(const char *path,Ui16GameList &games) {
         if(!parser.feed(buffer,n)){good=false;break;}
     }
     if(f_close(&file)!=FR_OK)good=false;
-    if(!good||!parser.finish()){games.titles.clear();games.titles_error=true;}
+    if(!good||!parser.finish()){games.titles.clear();games.crt_recommendations.clear();games.titles_error=true;}
 }
 #endif

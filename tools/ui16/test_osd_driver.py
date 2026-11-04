@@ -7,7 +7,7 @@ source=(ROOT/'ui/overlay.cpp').read_text(encoding='utf-8')
 a=source.index('// show a pop-up message');b=source.index('// turn overlay on/off',a);source=source[:a]+source[b:]
 source=source.replace('extern "C" {\n#include <FreeRTOS.h>\n#include <task.h>\n}','').replace('#include "utils.h"','')
 main=(ROOT/'main.cpp').read_text(encoding='utf-8')
-parser=main[main.index('            } else if (type == 2)'):main.index('            } else if (type == 3)')]
+parser=main[main.index('            } else if (type == 2)'):main.index('            } else if(type==0x12')]
 parser=parser[parser.index('#ifdef UI16_SYSTEM_MENU'):]
 query=main[main.index('static bool ui16_hw_osd_ready('):main.index('// UI16 launch adapters BEGIN')]
 code=r'''
@@ -26,7 +26,7 @@ static int depth=0;
 #define taskENTER_CRITICAL() do {++depth;} while(0)
 #define taskEXIT_CRITICAL() do {--depth;} while(0)
 static std::vector<unsigned> bytes;
-static volatile bool osd_config_ready=false,osd_config_capable=false;
+static volatile bool osd_config_ready=false,osd_config_capable=false,crt_stage1_capable=false,crt_blur_capable=false,crt_scanline_capable=false;
 static bool reply=true,supported=true;
 void fpga_tx_header(int command,int len){bytes.insert(bytes.end(),{0xaa,unsigned(len>>8),unsigned(len&255),unsigned(command)});if(command==2&&reply){osd_config_ready=true;osd_config_capable=supported;}}
 void fpga_tx_byte(unsigned char b){bytes.push_back(b);}
@@ -37,7 +37,7 @@ void delay(unsigned ms){clock_ms+=ms;}
 '''+source+query+r'''
 void feed_config(const std::string &s){
     unsigned pos=4,len=s.size()+1;
-    char osd_tag[7]={};unsigned osd_tag_count=0;bool osd_tag_found=false;
+    char osd_tag[7]={};unsigned osd_tag_count=0;bool osd_tag_found=false,crt_tag_found=false,blur_tag_found=false,scan_tag_found=false;
     for(unsigned char ch:s){
 '''+parser+r'''
     }
@@ -52,6 +52,12 @@ int main(){
     current=&task1;overlay_osd_capture_end();assert(!ui16_osd_capture_active()&&depth==0);
     osd_config_ready=false;osd_config_capable=false;feed_config("TangCore;OSDWIN1");assert(osd_config_ready&&osd_config_capable);
     osd_config_ready=false;osd_config_capable=true;feed_config("TangCore;OLD");assert(osd_config_ready&&!osd_config_capable);
+    feed_config("TangCore;OSDWIN1;CRTSTG1;CRTBLR1;CRTSCN1");assert(osd_config_capable&&crt_stage1_capable&&crt_blur_capable&&crt_scanline_capable);
+    feed_config("TangCore;OSDWIN1;CRTSTG1;CRTSCN1");assert(crt_stage1_capable&&!crt_blur_capable&&!crt_scanline_capable);
+    feed_config("TangCore;OSDWIN1;CRTSTG1;CRTBLR1");assert(osd_config_capable&&crt_stage1_capable&&crt_blur_capable&&!crt_scanline_capable);
+    feed_config("TangCore;CRTBLR1");assert(!osd_config_capable&&!crt_stage1_capable&&!crt_blur_capable);
+    feed_config("TangCore;OSDWIN1;CRTSTG1");assert(osd_config_capable&&crt_stage1_capable&&!crt_blur_capable);
+    feed_config("TangCore;OSDWIN1");assert(osd_config_capable&&!crt_stage1_capable);
     supported=true;assert(ui16_hw_osd_ready(nullptr));supported=false;assert(!ui16_hw_osd_ready(nullptr));
     reply=false;clock_ms=0;assert(!ui16_hw_osd_ready(nullptr)&&clock_ms==400);
     std::puts("Actual OSD driver passed: window/key packets, neutral-before-open/close, task-owned capture, marker parser, old-core rejection, bounded capability wait");

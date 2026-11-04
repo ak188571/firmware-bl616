@@ -6,6 +6,8 @@ ROOT=Path(__file__).resolve().parents[2]
 source=(ROOT/'main.cpp').read_text(encoding='utf-8')
 adapters=source.split('// UI16 launch adapters BEGIN',1)[1].split('\n',1)[1].split('// UI16 launch adapters END',1)[0]
 hid=source[source.index('static void send_hid_to_core(void)'):source.index('// // (R L X A RT LT DN UP START SELECT Y B)')]
+start=source.index('                const auto error=runtime.launch(')
+handoff=source[start:source.index('                    for(;;){',start)]+'                }\n'
 build=ROOT/'build-ui16-host';build.mkdir(exist_ok=True)
 code=r'''
 #include <cstdint>
@@ -13,6 +15,10 @@ code=r'''
 #include <vector>
 #include <cassert>
 #include <cstdio>
+#include "ui16_crt.h"
+#include "ui16_launch.h"
+static bool crt_stage1_capable=false;
+static Ui16GameOsd game_osd_owner=Ui16GameOsd::System;
 using std::uint16_t;using std::uint64_t;
 struct FILINFO {unsigned char fattrib=0;unsigned fsize=100;};
 constexpr int FR_OK=0,AM_DIR=16;
@@ -28,6 +34,33 @@ static uint64_t now=0;static int id=1,requests=0;
 uint64_t bflb_mtimer_get_time_ms(){return now;}
 void delay(unsigned ms){now+=ms;}
 static unsigned starting_frames=0,tx_waits=0;
+struct FIL{};static FIL fcore;
+constexpr unsigned BLOCK_SIZE=8192;
+static unsigned char fbuf[BLOCK_SIZE];
+static unsigned identify_calls=0,rom_calls=0;
+static unsigned restore_calls=0,defaults_calls=0;
+static bool identify_ok=true;
+static std::vector<std::string> io_order;
+Ui16RomIdentity ui16_identify_rom(int system,const char *path,FIL &file,void *buffer,unsigned capacity,void (*yield)()){
+ assert(system==1&& &file==&fcore&&buffer==fbuf&&capacity==BLOCK_SIZE&&!core_running);
+ ++identify_calls;io_order.push_back(std::string("identify:")+path);if(yield)yield();
+ return identify_ok?Ui16RomIdentity{true,Ui16RomVolume::Sd,1,0xabcdef01,65552}:Ui16RomIdentity{};
+}
+Ui16CrtRestore ui16_read_crt_override(const Ui16RomIdentity &identity,FIL &file,void *buffer,unsigned capacity){
+ assert(&file==&fcore&&buffer==fbuf&&capacity==BLOCK_SIZE&&!core_running);
+ ++restore_calls;io_order.push_back("restore");
+ return identity.valid?Ui16CrtRestore{Ui16CrtReadState::User,{true,{true,3,3}}}:Ui16CrtRestore{};
+}
+Ui16CrtDefaults ui16_read_crt_defaults(int system,const char *path,FIL &file,void *buffer,unsigned capacity){
+ assert(system==1&&path&& &file==&fcore&&buffer==fbuf&&capacity==BLOCK_SIZE&&!core_running);
+ ++defaults_calls;io_order.push_back("defaults");
+ return {Ui16CrtDefaultsState::Ready,Ui16CrtDefaultsSource::System,{true,{true,2,1}}};
+}
+static unsigned save_calls=0;static bool saved_reset=false;
+bool ui16_save_crt_override(const Ui16RomIdentity &,const Ui16CrtSettings &,FIL &file,void *buffer,unsigned capacity,bool reset=false){
+ assert(&file==&fcore&&buffer==fbuf&&capacity==BLOCK_SIZE);++save_calls;saved_reset=reset;return true;
+}
+void overlay_status(const char *,...){}
 static int tx_done=0,uart_device=0;
 static int *uart1_dev=&uart_device;
 void ui16_send_starting_game(){++starting_frames;}
@@ -35,17 +68,20 @@ int bflb_uart_wait_tx_done(int *dev){assert(dev==uart1_dev);++tx_waits;return tx
 void send_blank_packet(){}
 int get_core_id(){++requests;now+=200;return id;}
 static int result=0;static bool started=true;
-int rom(const char *){core_running=started;return result;}
+int rom(const char *){++rom_calls;io_order.push_back("rom");core_running=started;return result;}
 struct core_info {int (*load_rom)(const char *);};
 core_info target{rom};
 core_info *find_core_by_id(int n){return n==1?&target:nullptr;}
 void overlay(int n){_overlay_on=n;}
 void overlay_osd_window(unsigned,unsigned,unsigned,unsigned){}
+void overlay_osd_neutral();
 int overlay_on(){return _overlay_on;}
 void fpga_use_ui16_display(bool n){owner=n;}
 void dprint(const char *,...){}
 struct Pad {uint16_t j1=0,j2=0,h1=0,h2=0;};
 static std::vector<Pad> pads;static unsigned index=0;
+static unsigned neutral_calls=0;
+void overlay_osd_neutral(){++neutral_calls;++index;}
 void get_joypad_states(uint16_t *j1,uint16_t *j2,uint16_t *h1,uint16_t *h2){assert(index<pads.size());const auto p=pads[index];*j1=p.j1;*j2=p.j2;*h1=p.h1;*h2=p.h2;}
 void vTaskDelay(unsigned){++index;}
 #define pdMS_TO_TICKS(n) (n)
@@ -54,6 +90,22 @@ static std::vector<unsigned> bytes;
 void fpga_tx_header(int c,int n){assert(c==9&&n==5);}
 void fpga_tx_byte(unsigned char b){bytes.push_back(b);}
 '''+adapters+hid+r'''
+static unsigned session_calls=0,releases=0;
+static Ui16CrtRecommendation captured;
+static Ui16RomIdentity captured_id;
+static Ui16CrtRestore captured_restore;
+static Ui16CrtDefaults captured_defaults;
+void ui16_wait_release(){++releases;}
+void ui16_crt_new_session(const Ui16CrtRecommendation &value,const Ui16RomIdentity &identity,const Ui16CrtRestore &restore,Ui16CrtSaveFn save,const Ui16CrtDefaults &defaults){assert(save==ui16_hw_save_crt);++session_calls;captured=value;captured_id=identity;captured_restore=restore;captured_defaults=defaults;}
+struct FakeLaunch {
+ Ui16LaunchError result;
+ Ui16LaunchError launch(const char *,const Ui16LaunchTarget &,const Ui16LaunchRequest &){return result;}
+};
+void launch_handoff(Ui16LaunchError result,const Ui16LaunchRequest &request){
+ FakeLaunch runtime{result};const char *drv="sd:";Ui16LaunchTarget launch_target{1,"nes","nestang.bin"};
+'''+handoff+r'''
+}
+'''+r'''
 int main(){
  assert(ui16_hw_file_ready("sd:a.nes",nullptr));directory=true;assert(!ui16_hw_file_ready("x",nullptr));directory=false;
  file_result=1;assert(!ui16_hw_file_ready("x",nullptr));file_result=0;
@@ -66,6 +118,16 @@ int main(){
  result=1;assert(!ui16_hw_load_rom(1,"x",nullptr)&&!core_running);
  result=0;started=false;assert(!ui16_hw_load_rom(1,"x",nullptr)); // Includes SNES invalid-header return-0 case.
  assert(!ui16_hw_load_rom(999,"x",nullptr));
+ assert(identify_calls==0&&restore_calls==0&&defaults_calls==0&&!crt_rom_identity.valid); // Unsupported cores have no extra file access.
+ crt_stage1_capable=true;started=true;result=0;io_order.clear();
+ assert(ui16_hw_load_rom(1,"sd:nes/id.nes",nullptr)&&crt_rom_identity.valid);
+ assert((io_order==std::vector<std::string>{"identify:sd:nes/id.nes","restore","defaults","rom"}));
+ assert(crt_restore.override_value.present&&crt_defaults.recommendation.present);
+ identify_ok=false;const auto before_loads=rom_calls;
+ assert(ui16_hw_load_rom(1,"sd:nes/noid.nes",nullptr)&&!crt_rom_identity.valid&&rom_calls==before_loads+1);
+ assert(!crt_restore.override_value.present);
+ identify_ok=true;result=1;assert(!ui16_hw_load_rom(1,"x",nullptr)&&!crt_rom_identity.valid&&!crt_defaults.recommendation.present);
+ result=0;crt_stage1_capable=false;
  ui16_hw_display_owner(true,nullptr);assert(owner&&overlay_on());
  ui16_hw_display_owner(false,nullptr);assert(!owner&&overlay_on());
  const auto before_notice=now;
@@ -78,6 +140,34 @@ int main(){
  index=0;bytes.clear();overlay(0);pads={{4,128,0,0},{0x84,0,0,0}};send_hid_to_core();assert(index==1&&bytes.size()==4);
  // Software/keyboard overlay-on also exits gameplay input forwarding.
  index=0;bytes.clear();pads={{}};overlay(1);send_hid_to_core();assert(index==0);
+ // The real forwarding loop recognizes OSD2 only on a capable core and P1.
+ crt_stage1_capable=true;index=0;bytes.clear();overlay(0);
+ pads={{0,0x84,0,0},{0,0,1,0},{0,0,0x144,0}};send_hid_to_core();
+ assert(index==2&&bytes.size()==8&&game_osd_owner==Ui16GameOsd::Crt);
+ index=0;bytes.clear();overlay(0);pads={{0x184,0,0,0}};send_hid_to_core();
+ assert(bytes.empty()&&game_osd_owner==Ui16GameOsd::System);
+ index=0;bytes.clear();overlay(0);pads={{0xc4,0,0,0},{0,0,0,0},{0x44,0,0,0}};
+ send_hid_to_core();assert(index==2&&neutral_calls==1&&bytes.size()==4&&game_osd_owner==Ui16GameOsd::Crt);
+ const Ui16LaunchRequest seeded{1,"","dr.nes",{true,{true,1,2}}};
+ crt_stage1_capable=true;
+ for(auto error:{Ui16LaunchError::ProgramFailed,Ui16LaunchError::CoreTimeout,Ui16LaunchError::RomFailed,Ui16LaunchError::MissingRom}){
+  launch_handoff(error,seeded);assert(session_calls==0&&releases==0);
+ }
+ crt_stage1_capable=false;launch_handoff(Ui16LaunchError::None,seeded);assert(session_calls==0&&releases==1);
+ crt_stage1_capable=true;launch_handoff(Ui16LaunchError::None,seeded);
+ assert(session_calls==1&&captured.present&&captured.settings==Ui16CrtSettings({true,1,2}));
+ crt_rom_identity={true,Ui16RomVolume::Sd,1,0xabcdef01,65552};
+ launch_handoff(Ui16LaunchError::None,Ui16LaunchRequest{1,"","other.nes"});assert(session_calls==2&&!captured.present);
+ assert(captured_id.same_game(crt_rom_identity));
+ crt_defaults={Ui16CrtDefaultsState::Ready,Ui16CrtDefaultsSource::Global,{true,{true,1,1}}};
+ launch_handoff(Ui16LaunchError::None,seeded);assert(captured_defaults.source==Ui16CrtDefaultsSource::Global&&captured_defaults.recommendation.present);
+ crt_restore={Ui16CrtReadState::User,{true,{true,3,3}}};launch_handoff(Ui16LaunchError::None,seeded);assert(captured_restore.override_value.present);
+ active_core=1;core_running=true;crt_stage1_capable=true;
+ assert(ui16_hw_save_crt(crt_rom_identity,{true,1,2})&&save_calls==1&&!saved_reset);
+ assert(ui16_hw_save_crt(crt_rom_identity,{true,1,2},true)&&save_calls==2&&saved_reset);
+ active_core=6;assert(!ui16_hw_save_crt(crt_rom_identity,{})&&save_calls==2);
+ active_core=1;core_running=false;assert(!ui16_hw_save_crt(crt_rom_identity,{})&&save_calls==2);
+ core_running=true;crt_stage1_capable=false;assert(!ui16_hw_save_crt(crt_rom_identity,{})&&save_calls==2);
  std::puts("Actual main.cpp adapters passed: stat/program/ID timeout/load state, display ownership, unmodified X/Y game HID, OSD chord, neutral packets");
 }
 '''
@@ -87,7 +177,7 @@ if os.name=='nt':
     converted=subprocess.check_output(['cygpath','-m','/ucrt64/bin'],text=True,encoding='utf-8').strip()
     extra=['-B'+converted+'/']
 exe=build/('launch_adapters_test.exe' if os.name=='nt' else 'launch_adapters_test')
-subprocess.run(['g++',*extra,'-DUI16_SYSTEM_MENU','-std=c++17','-Wall','-Wextra','-Werror','-pedantic',str(path),'-o',str(exe)],check=True)
+subprocess.run(['g++',*extra,'-DUI16_SYSTEM_MENU','-std=c++17','-Wall','-Wextra','-Werror','-pedantic','-I'+str(ROOT/'ui'),str(path),'-o',str(exe)],check=True)
 subprocess.run([str(exe)],check=True)
 
 
@@ -139,6 +229,8 @@ syntax=r'''
 #include "ui16_browser.h"
 #include "ui16_launch.h"
 #include "menu_manager.h"
+#include "ui16_osd_menu.h"
+#include "ui16_crt.h"
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -157,7 +249,13 @@ void fpga_use_ui16_display(bool);
 bool ui16_hw_osd_ready(void *);
 bool ui16_hw_starting(void *);
 void overlay_osd_window(unsigned,unsigned,unsigned,unsigned);
-void ui16_osd_menu_input_loop();
+extern bool crt_stage1_capable;
+extern Ui16RomIdentity crt_rom_identity;
+extern Ui16CrtRestore crt_restore;
+extern Ui16CrtDefaults crt_defaults;
+bool ui16_hw_save_crt(const Ui16RomIdentity &,const Ui16CrtSettings &,bool);
+static bool crt_blur_capable=false,crt_scanline_capable=false;
+extern Ui16GameOsd game_osd_owner;
 void delay(unsigned);
 void get_joypad_states(uint16_t *,uint16_t *,uint16_t *,uint16_t *);
 unsigned long long bflb_mtimer_get_time_ms();

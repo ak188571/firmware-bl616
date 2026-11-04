@@ -42,6 +42,19 @@ int main(){
     assert((ordered.names==std::vector<std::string>{"Beta.nes","Folder","alpha.nes","zeta.nes"}));
     assert((ordered.titles==std::vector<std::string>{"B","F","",""}));
     assert((ordered.directories==std::vector<bool>{false,true,false,false}));
+    Ui16GameList extended;extended.status=Ui16ListStatus::Ready;
+    extended.names={"zeta.nes","alpha.nes","Folder"};extended.directories={false,false,true};
+    assert(parse("name\ttitle\tcrt_v1\nalpha.nes\t日本\t1:2:3\nFolder\tF\t\nzeta.nes\t\t0:0:0\n",extended));
+    assert(extended.names[0]=="alpha.nes"&&extended.crt_recommendations[0].present);
+    assert((extended.crt_recommendations[0].settings==Ui16CrtSettings{true,2,3}));
+    assert(!extended.crt_recommendations[1].present&&extended.crt_recommendations[2].present);
+    for(const auto &bad:std::vector<std::string>{
+        "name\ttitle\tcrt_v2\n", "name\ttitle\tcrt_v1\na.nes\tA\t1:4:0\n",
+        "name\ttitle\tcrt_v1\na.nes\tA\t2:0:0\n", "name\ttitle\tcrt_v1\na.nes\tA\t1:0\n",
+        "name\ttitle\tcrt_v1\na.nes\tA\n", "name\ttitle\tcrt_v1\nFolder\tF\t1:1:1\n"}){
+        const auto old_names=extended.names;assert(!parse(bad,extended)&&extended.names==old_names);
+        assert(extended.crt_recommendations[0].settings.blur==2);
+    }
     // A blank display title still participates in CSV ordering.
     Ui16GameList blank;blank.status=Ui16ListStatus::Ready;
     blank.names={"zeta.nes","alpha.nes","Beta.nes"};

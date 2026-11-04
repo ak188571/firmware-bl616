@@ -41,6 +41,11 @@ extern "C" {
 #include "ui16_titles.h"
 #include "ui16_launch.h"
 #include "ui16_osd_menu.h"
+#include "ui16_crt.h"
+#include "ui16_rom_id_reader.h"
+#include "ui16_crt_restore_reader.h"
+#include "ui16_crt_save.h"
+#include "ui16_crt_defaults_reader.h"
 #ifdef UI16_SD_FONT
 #include "ui16_font_cache.h"
 #ifdef UI16_RELIABLE_FONT
@@ -59,7 +64,8 @@ int option_osd_key = OPTION_OSD_KEY_SELECT_RIGHT;
 int16_t active_core = -1;           // firmware detected this core as active
 bool core_running;                  // a ROM is loaded and running on the core
 #ifdef UI16_SYSTEM_MENU
-static volatile bool osd_config_ready=false,osd_config_capable=false;
+static volatile bool osd_config_ready=false,osd_config_capable=false,crt_stage1_capable=false,crt_blur_capable=false,crt_scanline_capable=false;
+static Ui16GameOsd game_osd_owner=Ui16GameOsd::System;
 #endif
 struct core_info *core;
 
@@ -216,8 +222,16 @@ static void send_hid_to_core(void) {
         uint16_t joy1=0, joy2=0, hid1=0, hid2=0;
         get_joypad_states(&joy1, &joy2, &hid1, &hid2);
 #ifdef UI16_SYSTEM_MENU
+        if(crt_stage1_capable){
+            const auto request=ui16_osd_request(joy1,hid1);
+            if(ui16_osd_reserved(joy1)||ui16_osd_reserved(hid1)){
+                if(request==Ui16GameOsd::None){overlay_osd_neutral();first=true;delay(10);continue;}
+                game_osd_owner=request;overlay_osd_window(0,0,0,0);overlay(1);break;
+            }
+        }
         // Consume the OSD chord before sending game HID, and release any latched state.
-        if(joy1==OSD_KEY_CODE||joy2==OSD_KEY_CODE||hid1==OSD_KEY_CODE||hid2==OSD_KEY_CODE||overlay_on()){
+        if((!crt_stage1_capable&&(joy1==OSD_KEY_CODE||joy2==OSD_KEY_CODE||hid1==OSD_KEY_CODE||hid2==OSD_KEY_CODE))||overlay_on()){
+            game_osd_owner=Ui16GameOsd::System;
             overlay_osd_window(0,0,0,0);
             overlay(1);break;
         }
@@ -307,7 +321,7 @@ int joy_choice(int start_line, int len, int *active, int overlay_key_code) {
 #define UART1_RX_TASK_PRIORITY    3
 
 // UART1 RX IRQ drains the 32-byte hardware FIFO into a task-owned parser queue.
-// The OSD config reply is 85 bytes on the wire and cannot wait one RTOS tick.
+// Config replies exceed the hardware FIFO and cannot wait one RTOS tick.
 static volatile uint8_t uart1_rx_ring[1024];
 static volatile unsigned uart1_rx_write=0,uart1_rx_read=0;
 static volatile bool uart1_rx_overflow=false;
@@ -355,7 +369,7 @@ static void uart1_rx_task(void *pvParameters)
 #ifdef UI16_SYSTEM_MENU
     char osd_tag[7]={};
     unsigned osd_tag_count=0;
-    bool osd_tag_found=false;
+    bool osd_tag_found=false,crt_tag_found=false,blur_tag_found=false,scan_tag_found=false;
 #endif
     while (1) {
         uint8_t ch=0;
@@ -396,15 +410,28 @@ static void uart1_rx_task(void *pvParameters)
                 pos = 0;
             } else if (type == 2) {                 // config string / OSD feature marker
 #ifdef UI16_SYSTEM_MENU
-                if(pos==4){osd_tag_count=0;osd_tag_found=false;}
+                if(pos==4){osd_tag_count=0;osd_tag_found=false;crt_tag_found=false;blur_tag_found=false;scan_tag_found=false;}
                 for(unsigned i=0;i<6;++i)osd_tag[i]=osd_tag[i+1];
                 osd_tag[6]=static_cast<char>(ch);
                 if(++osd_tag_count>=7&&memcmp(osd_tag,"OSDWIN1",7)==0)osd_tag_found=true;
+                if(osd_tag_count>=7&&memcmp(osd_tag,"CRTSTG1",7)==0)crt_tag_found=true;
+                if(osd_tag_count>=7&&memcmp(osd_tag,"CRTBLR1",7)==0)blur_tag_found=true;
+                if(osd_tag_count>=7&&memcmp(osd_tag,"CRTSCN1",7)==0)scan_tag_found=true;
                 if(pos==len+2){
-                    taskENTER_CRITICAL();osd_config_capable=osd_tag_found;osd_config_ready=true;taskEXIT_CRITICAL();
+                    taskENTER_CRITICAL();crt_blur_capable=osd_tag_found&&crt_tag_found&&blur_tag_found;crt_scanline_capable=crt_blur_capable&&scan_tag_found;osd_config_capable=osd_tag_found;crt_stage1_capable=osd_tag_found&&crt_tag_found;osd_config_ready=true;taskEXIT_CRITICAL();
                 }
 #endif
                 if(pos==len+2)pos=0;else ++pos;
+            } else if(type==0x12 && len==5) {
+#ifdef UI16_SYSTEM_MENU
+                buffer[pos-4]=ch;
+                if(pos==7){
+                    ui16_crt_accept_status((std::uint32_t(buffer[0])<<24)|(std::uint32_t(buffer[1])<<16)|
+                                           (std::uint32_t(buffer[2])<<8)|buffer[3]);pos=0;
+                }else ++pos;
+#else
+                if(pos==7)pos=0;else ++pos;
+#endif
             } else if (type == 3) {                 // periodic joypad state
                 buffer[pos-4] = ch;
                 // Complete packet received
@@ -473,7 +500,7 @@ static void uart1_rx_task(void *pvParameters)
 #ifdef UI16_SYSTEM_MENU
 static bool ui16_hw_osd_ready(void *)
 {
-    taskENTER_CRITICAL();osd_config_ready=false;osd_config_capable=false;taskEXIT_CRITICAL();
+    taskENTER_CRITICAL();osd_config_ready=false;osd_config_capable=false;crt_stage1_capable=false;crt_blur_capable=false;crt_scanline_capable=false;taskEXIT_CRITICAL();
     fpga_tx_header(2,1);
     const auto start=bflb_mtimer_get_time_ms();
     while(!osd_config_ready&&bflb_mtimer_get_time_ms()-start<400)delay(10);
@@ -483,6 +510,14 @@ static bool ui16_hw_osd_ready(void *)
 }
 
 // UI16 launch adapters BEGIN (host-tested with hardware substitutes)
+static Ui16RomIdentity crt_rom_identity;
+static Ui16CrtRestore crt_restore;
+static Ui16CrtDefaults crt_defaults;
+// Only the validated NES path owns these resources without background disk I/O.
+static bool ui16_hw_save_crt(const Ui16RomIdentity &identity,const Ui16CrtSettings &value,bool reset=false){
+    if(!core_running||active_core!=1||!crt_stage1_capable||identity.system!=1)return false;
+    return ui16_save_crt_override(identity,value,fcore,fbuf,BLOCK_SIZE,reset);
+}
 static bool ui16_hw_file_ready(const char *path,void *)
 {
     FILINFO info{};
@@ -495,6 +530,7 @@ static bool ui16_hw_find_core(const char *name,std::string &path,void *)
 static bool ui16_hw_program(const char *path,void *)
 {
     core_running=false;active_core=-1;
+    crt_rom_identity={};crt_restore={};crt_defaults={};
     extern bool gba_bios_loaded,gba_missing_bios_warned;
     gba_bios_loaded=false;gba_missing_bios_warned=false;
     const bool ok=fpga_program(path);
@@ -517,9 +553,18 @@ static bool ui16_hw_load_rom(int id,const char *path,void *)
 {
     auto *target=find_core_by_id(id);
     core_running=false;
+    crt_rom_identity={};crt_restore={};crt_defaults={};
     if(!target||!target->load_rom)return false;
+    if(crt_stage1_capable){
+        overlay_status("Reading ROM ID...");
+        // The JTAG phase has finished. Reuse the noncacheable loader resources
+        // sequentially; identify_rom closes the read-only file before load_rom.
+        crt_rom_identity=ui16_identify_rom(id,path,fcore,fbuf,BLOCK_SIZE,[](){delay(1);});
+        crt_restore=ui16_read_crt_override(crt_rom_identity,fcore,fbuf,BLOCK_SIZE);
+        crt_defaults=ui16_read_crt_defaults(id,path,fcore,fbuf,BLOCK_SIZE);
+    }
     const int result=target->load_rom(path);
-    if(result!=0||!core_running){core_running=false;return false;}
+    if(result!=0||!core_running){core_running=false;crt_rom_identity={};crt_restore={};crt_defaults={};return false;}
     overlay(0);return true;
 }
 static void ui16_hw_display_owner(bool ui16,void *)
@@ -672,14 +717,17 @@ static void main_task(void *pvParameters)
                 if(error==Ui16LaunchError::None){
                     // Preserve normal game input; the UI button assignment is not a game remap.
                     ui16_wait_release();
+                    if(crt_stage1_capable)ui16_crt_new_session(request.crt_recommendation,crt_rom_identity,crt_restore,ui16_hw_save_crt,crt_defaults);
                     for(;;){
                         overlay(0);send_hid_to_core();
                         ui16_wait_release();overlay_osd_window(0,0,0,0);overlay(1);
                         menu_clear();
                         const std::string root=std::string(drv)+target->rom_dir;
-                        std::unique_ptr<Menu> popup(target->create_menu?target->create_menu(root.c_str()):create_default_menu(root.c_str()));
+                        std::unique_ptr<Menu> popup(game_osd_owner==Ui16GameOsd::Crt?ui16_create_crt_menu(crt_blur_capable,crt_scanline_capable):
+                            target->create_menu?target->create_menu(root.c_str()):create_default_menu(root.c_str()));
                         Menu *menu=popup.get();push_menu(std::move(popup));
-                        menu->do_redraw();ui16_osd_menu_input_loop();
+                        menu->do_redraw();ui16_osd_menu_input_loop(game_osd_owner!=Ui16GameOsd::Crt,
+                            game_osd_owner==Ui16GameOsd::Crt?"CRT SETTINGS":"SYSTEM",crt_stage1_capable);
                         const bool return_to_menu=overlay_on();
                         menu_clear();
                         if(return_to_menu)break; // Main Menu selected; reload monitor below.

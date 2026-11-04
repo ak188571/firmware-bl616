@@ -12,19 +12,23 @@ def valid_filename(name):
     return bool(name) and len(name.encode())<=255 and not any(ord(c)<32 or ord(c)>126 or c in '<>:"/\\|?*' for c in name) and not name.endswith((' ','.'))
 
 
-def read_titles(path,header='name'):
+def read_titles(path,header='name',include_crt=False):
     if Path(path).is_symlink():raise ValueError(f'Symbolic links are not supported: {path}')
     raw=Path(path).read_bytes()
     if len(raw)>MAX_BYTES:raise ValueError(f'{path}: file exceeds {MAX_BYTES} bytes')
     lines=raw.decode('utf-8-sig',errors='strict').split('\n')
-    if lines[0].removesuffix('\r')!=header+'\ttitle':
+    columns=lines[0].removesuffix('\r')
+    extended=header=='name' and columns=='name\ttitle\tcrt_v1'
+    if not extended and columns!=header+'\ttitle':
         raise ValueError(f'{path}:1: expected {header}<TAB>title; comma-separated CSV is not accepted')
     seen=set();result=[]
     for line_no,line in enumerate(lines[1:],2):
         line=line.removesuffix('\r')
         if not line:continue
-        if line.count('\t')!=1:raise ValueError(f'{path}:{line_no}: exactly two tab-separated fields required')
-        name,title=line.split('\t')
+        if line.count('\t')!=(2 if extended else 1):raise ValueError(f'{path}:{line_no}: wrong number of tab-separated fields')
+        fields=line.split('\t');name,title=fields[:2];crt=fields[2] if extended else ''
+        if crt and (len(crt)!=5 or crt[0] not in '01' or crt[1]!=':' or crt[2] not in '0123' or crt[3]!=':' or crt[4] not in '0123'):
+            raise ValueError(f'{path}:{line_no}: crt_v1 must be empty or enable:blur:scanline (0..1:0..3:0..3)')
         if not valid_filename(name):raise ValueError(f'{path}:{line_no}: invalid ASCII file/folder name (no paths or trailing slash)')
         if name.lower() in seen:raise ValueError(f'{path}:{line_no}: duplicate name {name}')
         seen.add(name.lower())
@@ -32,7 +36,7 @@ def read_titles(path,header='name'):
             raise ValueError(f'{path}:{line_no}: invalid title/control character or title exceeds {MAX_TITLE_BYTES} bytes')
         try:decode_title(title)
         except ValueError as e:raise ValueError(f'{path}:{line_no}: {e}') from e
-        result.append((line_no,name,title))
+        result.append((line_no,name,title,crt) if include_crt else (line_no,name,title))
     return result
 
 

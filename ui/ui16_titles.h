@@ -14,6 +14,7 @@ private:
     bool line();
     Ui16GameList &games_;
     std::vector<std::string> pending_;
+    std::vector<Ui16CrtRecommendation> crt_pending_;
     std::vector<bool> seen_;
     std::vector<std::size_t> order_;
     std::vector<std::string> csv_names_;
@@ -21,6 +22,7 @@ private:
     std::size_t total_ = 0;
     bool first_ = true;
     bool failed_ = false;
+    bool crt_column_ = false;
 };
 
 void ui16_load_titles(const char *path, Ui16GameList &games);
