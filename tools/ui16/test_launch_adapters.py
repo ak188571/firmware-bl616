@@ -17,7 +17,7 @@ code=r'''
 #include <cstdio>
 #include "ui16_crt.h"
 #include "ui16_launch.h"
-static bool crt_stage1_capable=false;
+static bool crt_stage1_capable=false,restart_capable=false;
 static Ui16GameOsd game_osd_owner=Ui16GameOsd::System;
 using std::uint16_t;using std::uint64_t;
 struct FILINFO {unsigned char fattrib=0;unsigned fsize=100;};
@@ -148,6 +148,14 @@ int main(){
  assert(bytes.empty()&&game_osd_owner==Ui16GameOsd::System);
  index=0;bytes.clear();overlay(0);pads={{0xc4,0,0,0},{0,0,0,0},{0x44,0,0,0}};
  send_hid_to_core();assert(index==2&&neutral_calls==1&&bytes.size()==4&&game_osd_owner==Ui16GameOsd::Crt);
+ // SNES can implement ROM-preserving reset independently of CRT/OSD2.
+ crt_stage1_capable=false;restart_capable=true;index=0;bytes.clear();overlay(0);
+ pads={{0,0x84,0,0},{0x44,0,0,0},{0x84,0,0,0},{0,0,0,0},{0,0,0x184,0}};
+ send_hid_to_core();assert(index==4&&game_osd_owner==Ui16GameOsd::System);
+ // Ambiguous left+right must stay reserved through partial release.
+ index=0;bytes.clear();overlay(0);pads={{0xc4,0,0,0},{0x84,0,0,0},{0,0,0,0},{0x84,0,0,0}};
+ send_hid_to_core();assert(index==3&&game_osd_owner==Ui16GameOsd::System);
+ restart_capable=false;
  const Ui16LaunchRequest seeded{1,"","dr.nes",{true,{true,1,2}}};
  crt_stage1_capable=true;
  for(auto error:{Ui16LaunchError::ProgramFailed,Ui16LaunchError::CoreTimeout,Ui16LaunchError::RomFailed,Ui16LaunchError::MissingRom}){
@@ -230,6 +238,7 @@ syntax=r'''
 #include "ui16_launch.h"
 #include "menu_manager.h"
 #include "ui16_osd_menu.h"
+#include "ui16_system_osd.h"
 #include "ui16_crt.h"
 #include <cstdint>
 #include <memory>
@@ -249,7 +258,12 @@ void fpga_use_ui16_display(bool);
 bool ui16_hw_osd_ready(void *);
 bool ui16_hw_starting(void *);
 void overlay_osd_window(unsigned,unsigned,unsigned,unsigned);
-extern bool crt_stage1_capable;
+extern bool crt_stage1_capable,restart_capable,core_running;
+extern int active_core;
+void fpga_tx_header(int,int);
+#define DEBUG(...) ((void)0)
+#define taskENTER_CRITICAL() ((void)0)
+#define taskEXIT_CRITICAL() ((void)0)
 extern Ui16RomIdentity crt_rom_identity;
 extern Ui16CrtRestore crt_restore;
 extern Ui16CrtDefaults crt_defaults;

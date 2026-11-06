@@ -1,5 +1,6 @@
 #include "ui16_osd.h"
 #include "ui16_osd_menu.h"
+#include "ui16_system_osd.h"
 #include "menu_manager.h"
 #include <cassert>
 #include <cstdio>
@@ -122,5 +123,28 @@ int main(){
     const auto inline_frame=ui16_osd_layout(ui16_osd_canvas(),{10,11},0,top,width,Ui16OsdPosition::TopRight);
     assert(boxes.size()==1&&clears==0);check_screen(snapshots[1],inline_frame);
     check_screen(snapshots[2],inline_frame);
-    menu_clear();std::puts("OSD host tests passed: dimensions, five anchors, in-place updates, held confirm rendering, no hide/clear, dialog recovery, Main Menu/resume");
+    // Real OSD1 menu and input loop: cancel cannot request either action.
+    Ui16SystemAction action;
+    menu_clear();push_menu(std::unique_ptr<Menu>(ui16_create_system_osd(action,true)));reset_output();
+    pads={{0x44},{1},{1},{0},{0x200}};
+    ui16_osd_menu_input_loop(true,"SYSTEM",true);
+    assert(action==Ui16SystemAction::None&&!overlay_on());
+    assert(boxes.size()==1&&boxes[0][0]==(32-boxes[0][2])/2&&boxes[0][1]==(28-boxes[0][3])/2);
+    // Opposite chord and its held suffix cannot confirm Restart Game.
+    menu_clear();push_menu(std::unique_ptr<Menu>(ui16_create_system_osd(action,true)));reset_output();
+    pads={{0x45},{1},{0},{0x20},{0},{1},{0}};
+    ui16_osd_menu_input_loop(true,"SYSTEM",true);
+    assert(action==Ui16SystemAction::ReturnToList&&overlay_on()&&!menu_is_active());
+    // Restart only becomes a request after a fresh confirmation. The main-task
+    // dispatcher owns the final release wait before transmitting reset.
+    menu_clear();push_menu(std::unique_ptr<Menu>(ui16_create_system_osd(action,true)));reset_output();
+    pads={{1},{1},{1},{0}};
+    ui16_osd_menu_input_loop(true,"SYSTEM",true);
+    assert(action==Ui16SystemAction::Restart&&at==1);
+    // Old images retain the list return path but never claim reset support.
+    menu_clear();push_menu(std::unique_ptr<Menu>(ui16_create_system_osd(action,false)));reset_output();
+    pads={{1},{0},{0},{0x20},{0},{1},{0}};
+    ui16_osd_menu_input_loop(true,"SYSTEM",true);
+    assert(action==Ui16SystemAction::ReturnToList&&overlay_on());
+    menu_clear();std::puts("OSD host tests passed: OSD1 actions, fixed center, old-image guard, chord suffix/held-confirm safety; five OSD2 positions and in-place rendering");
 }

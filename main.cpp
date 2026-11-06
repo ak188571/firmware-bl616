@@ -41,6 +41,7 @@ extern "C" {
 #include "ui16_titles.h"
 #include "ui16_launch.h"
 #include "ui16_osd_menu.h"
+#include "ui16_system_osd.h"
 #include "ui16_crt.h"
 #include "ui16_rom_id_reader.h"
 #include "ui16_crt_restore_reader.h"
@@ -64,7 +65,7 @@ int option_osd_key = OPTION_OSD_KEY_SELECT_RIGHT;
 int16_t active_core = -1;           // firmware detected this core as active
 bool core_running;                  // a ROM is loaded and running on the core
 #ifdef UI16_SYSTEM_MENU
-static volatile bool osd_config_ready=false,osd_config_capable=false,crt_stage1_capable=false,crt_blur_capable=false,crt_scanline_capable=false;
+static volatile bool osd_config_ready=false,osd_config_capable=false,crt_stage1_capable=false,crt_blur_capable=false,crt_scanline_capable=false,restart_capable=false;
 static Ui16GameOsd game_osd_owner=Ui16GameOsd::System;
 #endif
 struct core_info *core;
@@ -217,20 +218,28 @@ static void menu_options(void) {
 static void send_hid_to_core(void) {
     uint16_t hid1_old = 0, hid2_old = 0;
     bool first = true;
+#ifdef UI16_SYSTEM_MENU
+    bool osd_chord_release=false;
+#endif
     dprint("Start sending HID to core...");
     while (1) {
         uint16_t joy1=0, joy2=0, hid1=0, hid2=0;
         get_joypad_states(&joy1, &joy2, &hid1, &hid2);
 #ifdef UI16_SYSTEM_MENU
-        if(crt_stage1_capable){
+        if(osd_chord_release){
+            if(joy1|joy2|hid1|hid2){overlay_osd_neutral();first=true;delay(10);continue;}
+            osd_chord_release=false;
+        }
+        if(crt_stage1_capable||restart_capable){
             const auto request=ui16_osd_request(joy1,hid1);
             if(ui16_osd_reserved(joy1)||ui16_osd_reserved(hid1)){
-                if(request==Ui16GameOsd::None){overlay_osd_neutral();first=true;delay(10);continue;}
+                if(request==Ui16GameOsd::None){osd_chord_release=true;overlay_osd_neutral();first=true;delay(10);continue;}
+                if(request==Ui16GameOsd::Crt&&!crt_stage1_capable){osd_chord_release=true;overlay_osd_neutral();first=true;delay(10);continue;}
                 game_osd_owner=request;overlay_osd_window(0,0,0,0);overlay(1);break;
             }
         }
         // Consume the OSD chord before sending game HID, and release any latched state.
-        if((!crt_stage1_capable&&(joy1==OSD_KEY_CODE||joy2==OSD_KEY_CODE||hid1==OSD_KEY_CODE||hid2==OSD_KEY_CODE))||overlay_on()){
+        if((!(crt_stage1_capable||restart_capable)&&(joy1==OSD_KEY_CODE||joy2==OSD_KEY_CODE||hid1==OSD_KEY_CODE||hid2==OSD_KEY_CODE))||overlay_on()){
             game_osd_owner=Ui16GameOsd::System;
             overlay_osd_window(0,0,0,0);
             overlay(1);break;
@@ -369,7 +378,7 @@ static void uart1_rx_task(void *pvParameters)
 #ifdef UI16_SYSTEM_MENU
     char osd_tag[7]={};
     unsigned osd_tag_count=0;
-    bool osd_tag_found=false,crt_tag_found=false,blur_tag_found=false,scan_tag_found=false;
+    bool osd_tag_found=false,crt_tag_found=false,blur_tag_found=false,scan_tag_found=false,restart_tag_found=false;
 #endif
     while (1) {
         uint8_t ch=0;
@@ -410,15 +419,16 @@ static void uart1_rx_task(void *pvParameters)
                 pos = 0;
             } else if (type == 2) {                 // config string / OSD feature marker
 #ifdef UI16_SYSTEM_MENU
-                if(pos==4){osd_tag_count=0;osd_tag_found=false;crt_tag_found=false;blur_tag_found=false;scan_tag_found=false;}
+                if(pos==4){osd_tag_count=0;osd_tag_found=false;crt_tag_found=false;blur_tag_found=false;scan_tag_found=false;restart_tag_found=false;}
                 for(unsigned i=0;i<6;++i)osd_tag[i]=osd_tag[i+1];
                 osd_tag[6]=static_cast<char>(ch);
                 if(++osd_tag_count>=7&&memcmp(osd_tag,"OSDWIN1",7)==0)osd_tag_found=true;
                 if(osd_tag_count>=7&&memcmp(osd_tag,"CRTSTG1",7)==0)crt_tag_found=true;
                 if(osd_tag_count>=7&&memcmp(osd_tag,"CRTBLR1",7)==0)blur_tag_found=true;
                 if(osd_tag_count>=7&&memcmp(osd_tag,"CRTSCN1",7)==0)scan_tag_found=true;
+                if(osd_tag_count>=7&&memcmp(osd_tag,"RSTROM1",7)==0)restart_tag_found=true;
                 if(pos==len+2){
-                    taskENTER_CRITICAL();crt_blur_capable=osd_tag_found&&crt_tag_found&&blur_tag_found;crt_scanline_capable=crt_blur_capable&&scan_tag_found;osd_config_capable=osd_tag_found;crt_stage1_capable=osd_tag_found&&crt_tag_found;osd_config_ready=true;taskEXIT_CRITICAL();
+                    taskENTER_CRITICAL();restart_capable=osd_tag_found&&restart_tag_found;crt_blur_capable=osd_tag_found&&crt_tag_found&&blur_tag_found;crt_scanline_capable=crt_blur_capable&&scan_tag_found;osd_config_capable=osd_tag_found;crt_stage1_capable=osd_tag_found&&crt_tag_found;osd_config_ready=true;taskEXIT_CRITICAL();
                 }
 #endif
                 if(pos==len+2)pos=0;else ++pos;
@@ -500,7 +510,7 @@ static void uart1_rx_task(void *pvParameters)
 #ifdef UI16_SYSTEM_MENU
 static bool ui16_hw_osd_ready(void *)
 {
-    taskENTER_CRITICAL();osd_config_ready=false;osd_config_capable=false;crt_stage1_capable=false;crt_blur_capable=false;crt_scanline_capable=false;taskEXIT_CRITICAL();
+    taskENTER_CRITICAL();osd_config_ready=false;osd_config_capable=false;crt_stage1_capable=false;crt_blur_capable=false;crt_scanline_capable=false;restart_capable=false;taskEXIT_CRITICAL();
     fpga_tx_header(2,1);
     const auto start=bflb_mtimer_get_time_ms();
     while(!osd_config_ready&&bflb_mtimer_get_time_ms()-start<400)delay(10);
@@ -723,14 +733,32 @@ static void main_task(void *pvParameters)
                         ui16_wait_release();overlay_osd_window(0,0,0,0);overlay(1);
                         menu_clear();
                         const std::string root=std::string(drv)+target->rom_dir;
+                        Ui16SystemAction system_action=Ui16SystemAction::None;
+                        // Preserve PC/XT disk controls and other core-specific menus.
+                        const bool system_menu=game_osd_owner==Ui16GameOsd::System&&(target->id==1||target->id==2);
                         std::unique_ptr<Menu> popup(game_osd_owner==Ui16GameOsd::Crt?ui16_create_crt_menu(crt_blur_capable,crt_scanline_capable):
+                            system_menu?ui16_create_system_osd(system_action,restart_capable):
                             target->create_menu?target->create_menu(root.c_str()):create_default_menu(root.c_str()));
                         Menu *menu=popup.get();push_menu(std::move(popup));
                         menu->do_redraw();ui16_osd_menu_input_loop(game_osd_owner!=Ui16GameOsd::Crt,
-                            game_osd_owner==Ui16GameOsd::Crt?"CRT SETTINGS":"SYSTEM",crt_stage1_capable);
+                            game_osd_owner==Ui16GameOsd::Crt?"CRT SETTINGS":"SYSTEM",crt_stage1_capable||restart_capable);
                         const bool return_to_menu=overlay_on();
                         menu_clear();
-                        if(return_to_menu)break; // Main Menu selected; reload monitor below.
+                        if(system_action==Ui16SystemAction::Restart){
+                            // Remain blocked until confirm is released. No ROM loader,
+                            // FPGA programming, CRT session reset or filesystem operation.
+                            ui16_wait_release();
+                            if(core_running&&restart_capable&&(active_core==1||active_core==2)){
+                                taskENTER_CRITICAL();
+                                fpga_tx_header(0x13,1);
+                                taskEXIT_CRITICAL();
+                                DEBUG("OSD1: ROM-preserving reset command sent, core=%d\n",active_core);
+                                delay(25); // FPGA holds game reset for 20 ms.
+                            }
+                            overlay(0);
+                            continue;
+                        }
+                        if(return_to_menu)break; // Return to Game List; reload monitor below.
                         ui16_wait_release(); // OSD or X/Y closes the popup and resumes the game.
                     }
                     menu_clear();

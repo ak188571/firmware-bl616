@@ -26,7 +26,7 @@ static int depth=0;
 #define taskENTER_CRITICAL() do {++depth;} while(0)
 #define taskEXIT_CRITICAL() do {--depth;} while(0)
 static std::vector<unsigned> bytes;
-static volatile bool osd_config_ready=false,osd_config_capable=false,crt_stage1_capable=false,crt_blur_capable=false,crt_scanline_capable=false;
+static volatile bool osd_config_ready=false,osd_config_capable=false,crt_stage1_capable=false,crt_blur_capable=false,crt_scanline_capable=false,restart_capable=false;
 static bool reply=true,supported=true;
 void fpga_tx_header(int command,int len){bytes.insert(bytes.end(),{0xaa,unsigned(len>>8),unsigned(len&255),unsigned(command)});if(command==2&&reply){osd_config_ready=true;osd_config_capable=supported;}}
 void fpga_tx_byte(unsigned char b){bytes.push_back(b);}
@@ -37,7 +37,7 @@ void delay(unsigned ms){clock_ms+=ms;}
 '''+source+query+r'''
 void feed_config(const std::string &s){
     unsigned pos=4,len=s.size()+1;
-    char osd_tag[7]={};unsigned osd_tag_count=0;bool osd_tag_found=false,crt_tag_found=false,blur_tag_found=false,scan_tag_found=false;
+    char osd_tag[7]={};unsigned osd_tag_count=0;bool osd_tag_found=false,crt_tag_found=false,blur_tag_found=false,scan_tag_found=false,restart_tag_found=false;
     for(unsigned char ch:s){
 '''+parser+r'''
     }
@@ -58,6 +58,9 @@ int main(){
     feed_config("TangCore;CRTBLR1");assert(!osd_config_capable&&!crt_stage1_capable&&!crt_blur_capable);
     feed_config("TangCore;OSDWIN1;CRTSTG1");assert(osd_config_capable&&crt_stage1_capable&&!crt_blur_capable);
     feed_config("TangCore;OSDWIN1");assert(osd_config_capable&&!crt_stage1_capable);
+    feed_config("TangCore;OSDWIN1;RSTROM1");assert(restart_capable&&!crt_stage1_capable);
+    feed_config("TangCore;RSTROM1");assert(!restart_capable);
+    feed_config("TangCore;OSDWIN1");assert(!restart_capable);
     supported=true;assert(ui16_hw_osd_ready(nullptr));supported=false;assert(!ui16_hw_osd_ready(nullptr));
     reply=false;clock_ms=0;assert(!ui16_hw_osd_ready(nullptr)&&clock_ms==400);
     std::puts("Actual OSD driver passed: window/key packets, neutral-before-open/close, task-owned capture, marker parser, old-core rejection, bounded capability wait");

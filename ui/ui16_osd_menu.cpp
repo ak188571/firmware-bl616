@@ -17,7 +17,7 @@ void ui16_osd_menu_input_loop(bool fixed_center,const char *title,bool dual_osd)
     Ui16Navigation nav(0);
     int top=0,width_floor=0;
     std::uint16_t previous=0;
-    bool dirty=true;
+    bool dirty=true,chord_release=false;
     // The UI has one owning task, as does the existing capture canvas. Keep the
     // saved frame out of that task's call stack; validity is reset on each entry.
     static Ui16OsdFrame displayed;
@@ -63,7 +63,12 @@ void ui16_osd_menu_input_loop(bool fixed_center,const char *title,bool dual_osd)
         const auto buttons=static_cast<std::uint16_t>(dual_osd?(j1|h1):(j1|j2|h1|h2));
         // Other OSD chords are ignored while a popup owns input. Wait for all
         // buttons to release so their directions cannot adjust the current OSD.
-        if(dual_osd && (ui16_osd_reserved(j1)||ui16_osd_reserved(h1))){previous=buttons;delay(10);continue;}
+        if(dual_osd && (ui16_osd_reserved(j1)||ui16_osd_reserved(h1)))chord_release=true;
+        if(chord_release){
+            previous=buttons;
+            if((j1|j2|h1|h2)==0){chord_release=false;previous=0;}
+            delay(10);continue;
+        }
         const auto pressed=static_cast<std::uint16_t>(buttons&~previous);previous=buttons;
         const bool conflict=(buttons&UI16_BUTTON_CONFIRM)&&(buttons&UI16_BUTTON_BACK);
         if(!dual_osd&&(j1==OSD_KEY_CODE||j2==OSD_KEY_CODE||h1==OSD_KEY_CODE||h2==OSD_KEY_CODE)&&pressed){overlay(0);return;}
