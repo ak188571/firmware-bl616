@@ -565,7 +565,7 @@ static bool ui16_hw_load_rom(int id,const char *path,void *)
     core_running=false;
     crt_rom_identity={};crt_restore={};crt_defaults={};
     if(!target||!target->load_rom)return false;
-    if(crt_stage1_capable){
+    if(crt_stage1_capable&&id==1){
         overlay_status("Reading ROM ID...");
         // The JTAG phase has finished. Reuse the noncacheable loader resources
         // sequentially; identify_rom closes the read-only file before load_rom.
@@ -727,7 +727,10 @@ static void main_task(void *pvParameters)
                 if(error==Ui16LaunchError::None){
                     // Preserve normal game input; the UI button assignment is not a game remap.
                     ui16_wait_release();
-                    if(crt_stage1_capable)ui16_crt_new_session(request.crt_recommendation,crt_rom_identity,crt_restore,ui16_hw_save_crt,crt_defaults);
+                    if(crt_stage1_capable){
+                        if(request.core_id==2)ui16_crt_preview_session();
+                        else ui16_crt_new_session(request.crt_recommendation,crt_rom_identity,crt_restore,ui16_hw_save_crt,crt_defaults);
+                    }
                     for(;;){
                         overlay(0);send_hid_to_core();
                         ui16_wait_release();overlay_osd_window(0,0,0,0);overlay(1);

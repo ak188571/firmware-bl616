@@ -29,3 +29,5 @@ struct Menu;
 Menu *ui16_create_crt_menu(bool horizontal_blur=false,bool scanline=false);
 void ui16_crt_new_session(const Ui16CrtRecommendation &recommended={},const Ui16RomIdentity &rom_id={},const Ui16CrtRestore &restore={},Ui16CrtSaveFn save=nullptr,const Ui16CrtDefaults &defaults={});
 void ui16_crt_accept_status(std::uint32_t applied);
+// SNES stages 1/2: builtin OFF baseline, volatile preview, no storage access.
+void ui16_crt_preview_session();

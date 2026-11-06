@@ -71,7 +71,7 @@ static int result=0;static bool started=true;
 int rom(const char *){++rom_calls;io_order.push_back("rom");core_running=started;return result;}
 struct core_info {int (*load_rom)(const char *);};
 core_info target{rom};
-core_info *find_core_by_id(int n){return n==1?&target:nullptr;}
+core_info *find_core_by_id(int n){return (n==1||n==2)?&target:nullptr;}
 void overlay(int n){_overlay_on=n;}
 void overlay_osd_window(unsigned,unsigned,unsigned,unsigned){}
 void overlay_osd_neutral();
@@ -90,7 +90,8 @@ static std::vector<unsigned> bytes;
 void fpga_tx_header(int c,int n){assert(c==9&&n==5);}
 void fpga_tx_byte(unsigned char b){bytes.push_back(b);}
 '''+adapters+hid+r'''
-static unsigned session_calls=0,releases=0;
+static unsigned session_calls=0,preview_calls=0,releases=0;
+void ui16_crt_preview_session(){++preview_calls;}
 static Ui16CrtRecommendation captured;
 static Ui16RomIdentity captured_id;
 static Ui16CrtRestore captured_restore;
@@ -119,6 +120,10 @@ int main(){
  result=0;started=false;assert(!ui16_hw_load_rom(1,"x",nullptr)); // Includes SNES invalid-header return-0 case.
  assert(!ui16_hw_load_rom(999,"x",nullptr));
  assert(identify_calls==0&&restore_calls==0&&defaults_calls==0&&!crt_rom_identity.valid); // Unsupported cores have no extra file access.
+ crt_stage1_capable=true;started=true;result=0;
+ const auto before_snes_identify=identify_calls,before_snes_restore=restore_calls,before_snes_defaults=defaults_calls;
+ assert(ui16_hw_load_rom(2,"sd:snes/a.sfc",nullptr));
+ assert(identify_calls==before_snes_identify&&restore_calls==before_snes_restore&&defaults_calls==before_snes_defaults&&!crt_rom_identity.valid);
  crt_stage1_capable=true;started=true;result=0;io_order.clear();
  assert(ui16_hw_load_rom(1,"sd:nes/id.nes",nullptr)&&crt_rom_identity.valid);
  assert((io_order==std::vector<std::string>{"identify:sd:nes/id.nes","restore","defaults","rom"}));
@@ -167,6 +172,12 @@ int main(){
  crt_rom_identity={true,Ui16RomVolume::Sd,1,0xabcdef01,65552};
  launch_handoff(Ui16LaunchError::None,Ui16LaunchRequest{1,"","other.nes"});assert(session_calls==2&&!captured.present);
  assert(captured_id.same_game(crt_rom_identity));
+ launch_handoff(Ui16LaunchError::None,Ui16LaunchRequest{2,"","a.sfc",{true,{true,3,3}}});
+ assert(preview_calls==1&&session_calls==2); // SNES ignores persisted/CSV/default state.
+ active_core=2;core_running=true;
+ const auto before_snes_save=save_calls;
+ assert(!ui16_hw_save_crt(Ui16RomIdentity{true,Ui16RomVolume::Sd,2,123,456},{true,3,3})&&save_calls==before_snes_save);
+
  crt_defaults={Ui16CrtDefaultsState::Ready,Ui16CrtDefaultsSource::Global,{true,{true,1,1}}};
  launch_handoff(Ui16LaunchError::None,seeded);assert(captured_defaults.source==Ui16CrtDefaultsSource::Global&&captured_defaults.recommendation.present);
  crt_restore={Ui16CrtReadState::User,{true,{true,3,3}}};launch_handoff(Ui16LaunchError::None,seeded);assert(captured_restore.override_value.present);

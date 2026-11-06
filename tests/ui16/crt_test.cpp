@@ -257,6 +257,26 @@ int main(){
     assert(!preset_menu->on_choose(4)&&config==recommended.settings.merge(preserved));
     broken_defaults=system_defaults;broken_defaults.recommendation.settings.blur=4;
     ui16_crt_new_session({},rom_id,{},save_test,broken_defaults);assert(config==preserved);
+    // SNES stage1 has no storage identity, recommendation, or save actions.
+    const auto saves_before_preview=saves;
+    ui16_crt_preview_session();assert(config==preserved);
+    std::unique_ptr<Menu> preview(ui16_create_crt_menu());
+    assert((preview->get_options()==std::vector<int>{3,4,5}));
+    assert(preview->on_adjust(0,1)&&preview->on_adjust(1,1)&&preview->on_adjust(2,1));
+    const auto preview_value=config;
+    assert(!preview->on_choose(3)&&!preview->on_choose(4));
+    assert(config==preview_value&&saves==saves_before_preview);
+    ui16_osd_capture_begin();preview->render();ui16_osd_capture_end();
+    for(int row:{1,6,8,11})assert(std::string(ui16_osd_canvas().cells.data()+row*32,32).find("UNAVAILABLE")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+2*32,32).find("DEFAULT")!=std::string::npos);
+    assert(preview->on_close()&&config==preserved);
+    // Reopening stays volatile; returning to NES restores its existing policy.
+    preview.reset(ui16_create_crt_menu());assert((preview->get_options()==std::vector<int>{3,4,5}));
+    ui16_crt_new_session(recommended,rom_id,saved,save_test,system_defaults);
+    preview.reset(ui16_create_crt_menu(true,true));
+    assert((preview->get_options()==std::vector<int>{3,4,5,9,10}));
+    assert(config==saved.override_value.settings.merge(preserved));
+    assert(!preview->on_choose(3)&&saves==saves_before_preview); // unchanged USER, no write
     assert(critical_depth==0);
     std::puts("CRT host PASS: hotkeys, preserved config, frame ACK/retry, stale ACK rejection, CSV/default/explicit OFF seeds, invalid seed fallback, explicit SAVE/stay-open/retry and X/Y discard of live preview");
 }
