@@ -13,9 +13,9 @@ Ui16CrtSettings persisted,session_recommended;
 bool persisted_reset=false,reset_preview=false;
 bool preview_only=false;
 bool read_only=false;
-bool save_only=false;
+bool snes_session=false;
 bool storage_actions_disabled(){return preview_only||read_only;}
-bool reset_available(){return !storage_actions_disabled()&&!save_only;}
+bool reset_available(){return !storage_actions_disabled();}
 bool dirty(){return settings!=persisted||reset_preview!=persisted_reset;}
 Ui16CrtSaveFn save_callback=nullptr;
 bool saved_user=false,save_failed=false;
@@ -38,7 +38,7 @@ struct CrtMenu:Menu {
     bool matched=false;
     int osd_width()const override{return 23;}
     void render()override {
-        overlay_clear();overlay_cursor(0,0);overlay_printf("%s",save_only?"SNES CRT SAVE - S4B":read_only?"SNES CRT READ ONLY":preview_only&&blur_supported?"SNES CRT PREVIEW":scan_supported?"CRT DEFAULTS - STAGE5G":blur_supported?"H BLUR READY - STAGE4A":"BYPASS ONLY - STAGE 1");
+        overlay_clear();overlay_cursor(0,0);overlay_printf("%s",snes_session?"SNES CRT SETTINGS":read_only?"SNES CRT READ ONLY":preview_only&&blur_supported?"SNES CRT PREVIEW":scan_supported?"CRT DEFAULTS - STAGE5G":blur_supported?"H BLUR READY - STAGE4A":"BYPASS ONLY - STAGE 1");
         overlay_cursor(0,1);overlay_printf("SAVE: %s",read_only?"READ ONLY":preview_only?"UNAVAILABLE":save_failed?"FAILED":dirty()?"UNSAVED":(saved_user||persisted_reset)?"SAVED":"RECOMMENDED");
         overlay_cursor(0,2);overlay_printf("INITIAL: %s",restored.override_value.present?"USER":recommended_source);
         overlay_cursor(0,3);overlay_printf("%s %s",blur_supported?"CRT ENABLE  ":"CRT REQUEST ",settings.enabled?"ON":"OFF");
@@ -54,7 +54,7 @@ struct CrtMenu:Menu {
         overlay_cursor(0,10);overlay_printf("%s",reset_available()?"RESET TO RECOMMENDED":"RESET: NOT AVAILABLE");
         overlay_cursor(0,11);overlay_printf("DEFAULTS: %s",ui16_crt_defaults_state_name(defaults_snapshot.state));
     }
-    std::vector<int> get_options()override{if(storage_actions_disabled()){if(blur_supported&&!scan_supported)return {3,4};return {3,4,5};}if(blur_supported&&!scan_supported)return save_only?std::vector<int>{3,4,9}:std::vector<int>{3,4,9,10};return save_only?std::vector<int>{3,4,5,9}:std::vector<int>{3,4,5,9,10};}
+    std::vector<int> get_options()override{if(storage_actions_disabled()){if(blur_supported&&!scan_supported)return {3,4};return {3,4,5};}if(blur_supported&&!scan_supported)return {3,4,9,10};return {3,4,5,9,10};}
     bool on_adjust(int row,int delta)override {
         if(row==0)settings.enabled=!settings.enabled;
         else if(row==1)settings.blur=(settings.blur+(delta>0?1:3))%4;
@@ -100,7 +100,7 @@ struct CrtMenu:Menu {
 };
 }
 void ui16_crt_new_session(const Ui16CrtRecommendation &recommended,const Ui16RomIdentity &rom_id,const Ui16CrtRestore &restore,Ui16CrtSaveFn save,const Ui16CrtDefaults &defaults){
-    preview_only=false;read_only=false;save_only=false;
+    preview_only=false;read_only=false;snes_session=false;
     identity=rom_id;save_callback=save;save_failed=false;
     restored=restore;
     if(!identity.valid||!restore.override_value.present||restore.override_value.settings.blur>3||restore.override_value.settings.scanline>3||
@@ -138,13 +138,13 @@ void ui16_crt_readonly_session(const Ui16CrtRecommendation &recommended,const Ui
 void ui16_crt_accept_status(std::uint32_t applied) {
     taskENTER_CRITICAL();applied_status=applied;status_seen=true;taskEXIT_CRITICAL();
 }
-void ui16_crt_snes_save_session(const Ui16CrtRecommendation &recommended,const Ui16RomIdentity &rom_id,
+void ui16_crt_snes_session(const Ui16CrtRecommendation &recommended,const Ui16RomIdentity &rom_id,
                               const Ui16CrtRestore &restore,Ui16CrtSaveFn save,const Ui16CrtDefaults &defaults){
     if(!rom_id.valid||rom_id.system!=2||rom_id.volume!=Ui16RomVolume::Sd||!save){
         ui16_crt_readonly_session(recommended,rom_id,restore,defaults);return;
     }
     ui16_crt_new_session(recommended,rom_id,restore,save,defaults);
-    save_only=true;
+    snes_session=true;
 }
 Menu *ui16_create_crt_menu(bool horizontal_blur,bool scanline){return new CrtMenu(horizontal_blur,scanline);}
 #endif

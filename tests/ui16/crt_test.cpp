@@ -282,15 +282,15 @@ int main(){
     assert(config==system_defaults.recommendation.settings.merge(preserved));
     ui16_crt_readonly_session(recommended,rom_id,saved,system_defaults); // Cross-system identity rejected.
     assert(config==recommended.settings.merge(preserved));
-    // S4b enables explicit USER SAVE without exposing recommended Reset.
-    ui16_crt_snes_save_session(recommended,snes_id,saved,save_test,system_defaults);
+    // SNES SD uses the same explicit SAVE and Reset intent semantics.
+    ui16_crt_snes_session(recommended,snes_id,saved,save_test,system_defaults);
     std::unique_ptr<Menu> snes_menu(ui16_create_crt_menu(true,true));
     const auto before_snes_save=saves;const auto snes_initial=config;
-    assert((snes_menu->get_options()==std::vector<int>{3,4,5,9}));
-    assert(!snes_menu->on_choose(4)&&!snes_menu->inline_choice(4)&&config==snes_initial);
+    assert((snes_menu->get_options()==std::vector<int>{3,4,5,9,10}));
+    assert(snes_menu->inline_choice(4)&&config==snes_initial);
     ui16_osd_capture_begin();snes_menu->render();ui16_osd_capture_end();
-    assert(std::string(ui16_osd_canvas().cells.data(),32).find("SNES CRT SAVE - S4B")!=std::string::npos);
-    assert(std::string(ui16_osd_canvas().cells.data()+10*32,32).find("NOT AVAILABLE")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data(),32).find("SNES CRT SETTINGS")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+10*32,32).find("RESET TO RECOMMENDED")!=std::string::npos);
     assert(snes_menu->on_adjust(1,1));_overlay_on=1;save_ok=true;
     assert(!snes_menu->on_choose(3)&&saves==before_snes_save+1&&!saved_reset&&overlay_on());
     const auto snes_success=config;
@@ -303,12 +303,59 @@ int main(){
     assert(snes_menu->on_adjust(2,1));save_ok=true;
     assert(!snes_menu->on_choose(3)&&saves==before_snes_save+3&&!saved_reset);
     assert(!snes_menu->on_choose(4));
+    // Reset previews without writing, cancels values AND intent, and saves mode separately.
+    ui16_crt_snes_session(recommended,snes_id,saved,save_test,system_defaults);
+    snes_menu.reset(ui16_create_crt_menu(true,true));_overlay_on=1;
+    const auto before_snes_reset=saves;
+    assert(!snes_menu->on_choose(4)&&saves==before_snes_reset);
+    assert(config==recommended.settings.merge(preserved)); // CSV overrides SYSTEM.
+    assert(snes_menu->on_close()&&config==saved.override_value.settings.merge(preserved));
+    assert(!snes_menu->on_choose(3)&&saves==before_snes_reset); // Cancel restored USER intent.
+    assert(!snes_menu->on_choose(4)&&!snes_menu->on_choose(3));
+    assert(saves==before_snes_reset+1&&saved_reset&&saved_value==recommended.settings&&overlay_on());
+    assert(!snes_menu->on_choose(4)&&!snes_menu->on_choose(3)&&saves==before_snes_reset+1);
+    assert(snes_menu->on_adjust(1,1)&&snes_menu->on_close());
+    assert(config==recommended.settings.merge(preserved));
+    assert(!snes_menu->on_choose(3)&&saves==before_snes_reset+1); // Cancel preserves saved Reset intent.
+    assert(snes_menu->on_adjust(1,1)&&!snes_menu->on_choose(3)&&!saved_reset);
+    // Even equal numeric USER and recommendation require a Reset-mode save.
+    ui16_crt_snes_session(recommended,snes_id,{Ui16CrtReadState::User,recommended},save_test,system_defaults);
+    const auto before_equal=saves;
+    assert(!snes_menu->on_choose(4)&&config==recommended.settings.merge(preserved));
+    ui16_osd_capture_begin();snes_menu->render();ui16_osd_capture_end();
+    assert(std::string(ui16_osd_canvas().cells.data()+32,32).find("UNSAVED")!=std::string::npos);
+    assert(!snes_menu->on_choose(3)&&saved_reset&&saves==before_equal+1);
+    // On the next launch a Reset record follows current CSV/SYSTEM/GLOBAL/builtin.
+    const Ui16CrtRestore reset_record{Ui16CrtReadState::Reset,{},1,4};
+    for(unsigned source=0;source<4;source++){
+        const auto csv=source==0?changed_csv:Ui16CrtRecommendation{};
+        const auto defs=source==1?system_defaults:source==2?global_defaults:Ui16CrtDefaults{};
+        ui16_crt_snes_session(csv,snes_id,reset_record,save_test,defs);
+        const auto expected=source==0?changed_csv.settings:source==1?system_defaults.recommendation.settings:
+                            source==2?global_defaults.recommendation.settings:Ui16CrtSettings{};
+        assert(config==expected.merge(preserved));const auto before_reloaded=saves;
+        assert(!snes_menu->on_choose(3)&&saves==before_reloaded);
+        ui16_osd_capture_begin();snes_menu->render();ui16_osd_capture_end();
+        assert(std::string(ui16_osd_canvas().cells.data()+2*32,32).find(source==0?"CSV":source==1?"SYSTEM":source==2?"GLOBAL":"DEFAULT")!=std::string::npos);
+        assert(std::string(ui16_osd_canvas().cells.data()+6*32,32).find("RESET")!=std::string::npos);
+    }
+    // A failed Reset SAVE cancels through the real X/Y paths to the prior USER.
+    for(unsigned back:{0x200u,0x2u}){
+        ui16_crt_snes_session(recommended,snes_id,saved,save_test,system_defaults);save_ok=false;
+        auto failed_reset=std::unique_ptr<Menu>(ui16_create_crt_menu(true,true));
+        assert(!failed_reset->on_choose(4)&&!failed_reset->on_choose(3)&&saved_reset);
+        const auto before_cancel=saves;
+        menu_clear();push_menu(std::move(failed_reset));_overlay_on=1;at=0;pads={static_cast<std::uint16_t>(back)};
+        ui16_osd_menu_input_loop(false,"CRT SETTINGS",true);
+        assert(!overlay_on()&&saves==before_cancel&&config==saved.override_value.settings.merge(preserved));menu_clear();
+    }
+    save_ok=true;
     for(unsigned bad=0;bad<4;bad++){
         auto rejected=snes_id;
         if(bad==0)rejected.valid=false;
         if(bad==1)rejected.system=1;
         if(bad==2)rejected.volume=Ui16RomVolume::Usb;
-        ui16_crt_snes_save_session(recommended,rejected,saved,bad==3?nullptr:save_test,system_defaults);
+        ui16_crt_snes_session(recommended,rejected,saved,bad==3?nullptr:save_test,system_defaults);
         snes_menu.reset(ui16_create_crt_menu(true,true));
         assert((snes_menu->get_options()==std::vector<int>{3,4,5}));
         const auto no_write=saves;

@@ -557,7 +557,7 @@ static bool ui16_hw_save_crt(const Ui16RomIdentity &identity,const Ui16CrtSettin
     if(!core_running||!crt_stage1_capable)return false;
     const bool nes=active_core==1&&identity.system==1;
     const bool snes=active_core==2&&snes_crt_sd_session&&identity.system==2&&
-        identity.volume==Ui16RomVolume::Sd&&identity.same_game(crt_rom_identity)&&!reset;
+        identity.volume==Ui16RomVolume::Sd&&identity.same_game(crt_rom_identity);
     if(!nes&&!snes)return false;
     TcStorageLease lease;if(!lease)return false;
     if(snes&&tc_snes_sd_faulted())return false;
@@ -780,7 +780,7 @@ static void main_task(void *pvParameters)
                     ui16_wait_release();
                     if(crt_stage1_capable){
                         if(request.core_id==2){
-                            if(snes_crt_sd_session)ui16_crt_snes_save_session(request.crt_recommendation,crt_rom_identity,crt_restore,ui16_hw_save_crt,crt_defaults);
+                            if(snes_crt_sd_session)ui16_crt_snes_session(request.crt_recommendation,crt_rom_identity,crt_restore,ui16_hw_save_crt,crt_defaults);
                             else ui16_crt_preview_session(); // USB ROM storage stays volatile in S4a.
                         }
                         else ui16_crt_new_session(request.crt_recommendation,crt_rom_identity,crt_restore,ui16_hw_save_crt,crt_defaults);

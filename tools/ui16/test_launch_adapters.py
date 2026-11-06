@@ -113,7 +113,7 @@ static Ui16CrtRestore captured_restore;
 static Ui16CrtDefaults captured_defaults;
 void ui16_wait_release(){++releases;}
 void ui16_crt_new_session(const Ui16CrtRecommendation &value,const Ui16RomIdentity &identity,const Ui16CrtRestore &restore,Ui16CrtSaveFn save,const Ui16CrtDefaults &defaults){assert(save==ui16_hw_save_crt);++session_calls;captured=value;captured_id=identity;captured_restore=restore;captured_defaults=defaults;}
-void ui16_crt_snes_save_session(const Ui16CrtRecommendation &value,const Ui16RomIdentity &identity,const Ui16CrtRestore &restore,Ui16CrtSaveFn save,const Ui16CrtDefaults &defaults){assert(identity.system==2&&save==ui16_hw_save_crt);++snes_session_calls;captured=value;captured_id=identity;captured_restore=restore;captured_defaults=defaults;}
+void ui16_crt_snes_session(const Ui16CrtRecommendation &value,const Ui16RomIdentity &identity,const Ui16CrtRestore &restore,Ui16CrtSaveFn save,const Ui16CrtDefaults &defaults){assert(identity.system==2&&save==ui16_hw_save_crt);++snes_session_calls;captured=value;captured_id=identity;captured_restore=restore;captured_defaults=defaults;}
 struct FakeLaunch {
  Ui16LaunchError result;
  Ui16LaunchError launch(const char *,const Ui16LaunchTarget &,const Ui16LaunchRequest &){return result;}
@@ -220,19 +220,22 @@ int main(){
  crt_rom_identity={true,Ui16RomVolume::Sd,2,0xabcdef01,2097152};
  const auto snes_saves=save_calls;
  assert(ui16_hw_save_crt(crt_rom_identity,{true,2,1})&&save_calls==snes_saves+1&&save_scope_seen&&!sd_scope&&storage_depth==0);
- for(unsigned rejected=0;rejected<7;rejected++){
-  auto key=crt_rom_identity;bool reset=false;
+ assert(ui16_hw_save_crt(crt_rom_identity,{true,2,1},true)&&save_calls==snes_saves+2&&saved_reset&&save_scope_seen&&!sd_scope&&storage_depth==0);
+ // USER and Reset use identical session/key/lease/fault guards.
+ for(bool reset:{false,true})for(unsigned rejected=0;rejected<6;rejected++){
+  auto key=crt_rom_identity;
   if(rejected==0)key.valid=false;
   if(rejected==1)key.system=1;
   if(rejected==2)key.volume=Ui16RomVolume::Usb;
   if(rejected==3)key.crc^=1;
   if(rejected==4)key.size++;
-  if(rejected==5)reset=true;
-  if(rejected==6)snes_crt_sd_session=false;
-  assert(!ui16_hw_save_crt(key,{true,3,3},reset)&&save_calls==snes_saves+1);
+  if(rejected==5)snes_crt_sd_session=false;
+  assert(!ui16_hw_save_crt(key,{true,3,3},reset)&&save_calls==snes_saves+2);
   snes_crt_sd_session=true;
  }
- sd_fault=true;assert(!ui16_hw_save_crt(crt_rom_identity,{})&&save_calls==snes_saves+1);sd_fault=false;
+ sd_fault=true;
+ for(bool reset:{false,true})assert(!ui16_hw_save_crt(crt_rom_identity,{},reset)&&save_calls==snes_saves+2);
+ sd_fault=false;
  save_causes_fault=true;assert(!ui16_hw_save_crt(crt_rom_identity,{})&&sd_fault&&!sd_scope&&storage_depth==0);
  save_causes_fault=false;sd_fault=false; // Substitute power-on reset only.
  lease_available=false;const auto no_lease_calls=save_calls;
