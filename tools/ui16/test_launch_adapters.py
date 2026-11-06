@@ -5,6 +5,7 @@ import os,subprocess
 ROOT=Path(__file__).resolve().parents[2]
 source=(ROOT/'main.cpp').read_text(encoding='utf-8')
 adapters=source.split('// UI16 launch adapters BEGIN',1)[1].split('\n',1)[1].split('// UI16 launch adapters END',1)[0]
+ownership=source.split('// Application storage ownership BEGIN',1)[1].split('\n',1)[1].split('static bool pcxt_disk_owner()',1)[0]
 hid=source[source.index('static void send_hid_to_core(void)'):source.index('// // (R L X A RT LT DN UP START SELECT Y B)')]
 start=source.index('                const auto error=runtime.launch(')
 handoff=source[start:source.index('                    for(;;){',start)]+'                }\n'
@@ -15,8 +16,19 @@ code=r'''
 #include <vector>
 #include <cassert>
 #include <cstdio>
+#include <cstring>
 #include "ui16_crt.h"
 #include "ui16_launch.h"
+#include "tc_snes_sd_guard.h"
+using SemaphoreHandle_t=int;
+constexpr int pdTRUE=1,portMAX_DELAY=-1;
+static int storage_depth=0;
+static bool lease_available=true,sd_scope=false,sd_fault=false;
+static int fail_io_stage=0;
+int xSemaphoreTake(int,int){if(!lease_available)return 0;assert(storage_depth==0);storage_depth++;return 1;}
+void xSemaphoreGive(int){assert(storage_depth==1);storage_depth--;}
+bool tc_snes_sd_scope(bool value){const bool old=sd_scope;sd_scope=value;return old;}
+bool tc_snes_sd_faulted(){return sd_fault;}
 static bool crt_stage1_capable=false,restart_capable=false;
 static Ui16GameOsd game_osd_owner=Ui16GameOsd::System;
 using std::uint16_t;using std::uint64_t;
@@ -42,18 +54,21 @@ static unsigned restore_calls=0,defaults_calls=0;
 static bool identify_ok=true;
 static std::vector<std::string> io_order;
 Ui16RomIdentity ui16_identify_rom(int system,const char *path,FIL &file,void *buffer,unsigned capacity,void (*yield)()){
- assert(system==1&& &file==&fcore&&buffer==fbuf&&capacity==BLOCK_SIZE&&!core_running);
+ assert((system==1||system==2)&& &file==&fcore&&buffer==fbuf&&capacity==BLOCK_SIZE&&!core_running&&storage_depth==1);
  ++identify_calls;io_order.push_back(std::string("identify:")+path);if(yield)yield();
- return identify_ok?Ui16RomIdentity{true,Ui16RomVolume::Sd,1,0xabcdef01,65552}:Ui16RomIdentity{};
+ if(fail_io_stage==1)sd_fault=true;
+ return identify_ok?Ui16RomIdentity{true,Ui16RomVolume::Sd,unsigned(system),0xabcdef01,65552}:Ui16RomIdentity{};
 }
 Ui16CrtRestore ui16_read_crt_override(const Ui16RomIdentity &identity,FIL &file,void *buffer,unsigned capacity){
  assert(&file==&fcore&&buffer==fbuf&&capacity==BLOCK_SIZE&&!core_running);
  ++restore_calls;io_order.push_back("restore");
+ if(fail_io_stage==2)sd_fault=true;
  return identity.valid?Ui16CrtRestore{Ui16CrtReadState::User,{true,{true,3,3}}}:Ui16CrtRestore{};
 }
 Ui16CrtDefaults ui16_read_crt_defaults(int system,const char *path,FIL &file,void *buffer,unsigned capacity){
- assert(system==1&&path&& &file==&fcore&&buffer==fbuf&&capacity==BLOCK_SIZE&&!core_running);
+ assert((system==1||system==2)&&path&& &file==&fcore&&buffer==fbuf&&capacity==BLOCK_SIZE&&!core_running&&storage_depth==1);
  ++defaults_calls;io_order.push_back("defaults");
+ if(fail_io_stage==3)sd_fault=true;
  return {Ui16CrtDefaultsState::Ready,Ui16CrtDefaultsSource::System,{true,{true,2,1}}};
 }
 static unsigned save_calls=0;static bool saved_reset=false;
@@ -89,8 +104,8 @@ void vTaskDelay(unsigned){++index;}
 static std::vector<unsigned> bytes;
 void fpga_tx_header(int c,int n){assert(c==9&&n==5);}
 void fpga_tx_byte(unsigned char b){bytes.push_back(b);}
-'''+adapters+hid+r'''
-static unsigned session_calls=0,preview_calls=0,releases=0;
+'''+ownership+adapters+hid+r'''
+static unsigned session_calls=0,preview_calls=0,readonly_calls=0,releases=0;
 void ui16_crt_preview_session(){++preview_calls;}
 static Ui16CrtRecommendation captured;
 static Ui16RomIdentity captured_id;
@@ -98,6 +113,7 @@ static Ui16CrtRestore captured_restore;
 static Ui16CrtDefaults captured_defaults;
 void ui16_wait_release(){++releases;}
 void ui16_crt_new_session(const Ui16CrtRecommendation &value,const Ui16RomIdentity &identity,const Ui16CrtRestore &restore,Ui16CrtSaveFn save,const Ui16CrtDefaults &defaults){assert(save==ui16_hw_save_crt);++session_calls;captured=value;captured_id=identity;captured_restore=restore;captured_defaults=defaults;}
+void ui16_crt_readonly_session(const Ui16CrtRecommendation &value,const Ui16RomIdentity &identity,const Ui16CrtRestore &restore,const Ui16CrtDefaults &defaults){assert(identity.system==2);++readonly_calls;captured=value;captured_id=identity;captured_restore=restore;captured_defaults=defaults;}
 struct FakeLaunch {
  Ui16LaunchError result;
  Ui16LaunchError launch(const char *,const Ui16LaunchTarget &,const Ui16LaunchRequest &){return result;}
@@ -108,6 +124,7 @@ void launch_handoff(Ui16LaunchError result,const Ui16LaunchRequest &request){
 }
 '''+r'''
 int main(){
+ storage_mutex=1;
  assert(ui16_hw_file_ready("sd:a.nes",nullptr));directory=true;assert(!ui16_hw_file_ready("x",nullptr));directory=false;
  file_result=1;assert(!ui16_hw_file_ready("x",nullptr));file_result=0;
  std::string path;assert(ui16_hw_find_core("nestang.bin",path,nullptr)&&path=="sd:cores/nestang.bin");
@@ -123,7 +140,15 @@ int main(){
  crt_stage1_capable=true;started=true;result=0;
  const auto before_snes_identify=identify_calls,before_snes_restore=restore_calls,before_snes_defaults=defaults_calls;
  assert(ui16_hw_load_rom(2,"sd:snes/a.sfc",nullptr));
- assert(identify_calls==before_snes_identify&&restore_calls==before_snes_restore&&defaults_calls==before_snes_defaults&&!crt_rom_identity.valid);
+ assert(identify_calls==before_snes_identify+1&&restore_calls==before_snes_restore+1&&defaults_calls==before_snes_defaults+1&&crt_rom_identity.system==2&&snes_crt_readonly&&!sd_scope&&storage_depth==0);
+ const auto before_usb=identify_calls;
+ assert(ui16_hw_load_rom(2,"usb:snes/a.sfc",nullptr)&&identify_calls==before_usb&&!crt_rom_identity.valid&&!snes_crt_readonly);
+ for(int stage=1;stage<=3;stage++){
+  fail_io_stage=stage;sd_fault=false;const auto before_rom=rom_calls;
+  assert(!ui16_hw_load_rom(2,"sd:snes/fail.sfc",nullptr)&&rom_calls==before_rom&&!core_running&&!crt_rom_identity.valid&&!snes_crt_readonly);
+  assert(!crt_restore.override_value.present&&!crt_defaults.recommendation.present&&!sd_scope&&storage_depth==0);
+ }
+ fail_io_stage=0;sd_fault=false; // Substitute power-on reset, not a firmware recovery API.
  crt_stage1_capable=true;started=true;result=0;io_order.clear();
  assert(ui16_hw_load_rom(1,"sd:nes/id.nes",nullptr)&&crt_rom_identity.valid);
  assert((io_order==std::vector<std::string>{"identify:sd:nes/id.nes","restore","defaults","rom"}));
@@ -174,6 +199,10 @@ int main(){
  assert(captured_id.same_game(crt_rom_identity));
  launch_handoff(Ui16LaunchError::None,Ui16LaunchRequest{2,"","a.sfc",{true,{true,3,3}}});
  assert(preview_calls==1&&session_calls==2); // SNES ignores persisted/CSV/default state.
+ snes_crt_readonly=true;crt_rom_identity.system=2;
+ launch_handoff(Ui16LaunchError::None,Ui16LaunchRequest{2,"","a.sfc",{true,{true,2,1}}});
+ assert(readonly_calls==1&&captured.present&&captured.settings==Ui16CrtSettings({true,2,1})&&captured_id.system==2);
+ crt_rom_identity.system=1;
  active_core=2;core_running=true;
  const auto before_snes_save=save_calls;
  assert(!ui16_hw_save_crt(Ui16RomIdentity{true,Ui16RomVolume::Sd,2,123,456},{true,3,3})&&save_calls==before_snes_save);
@@ -187,6 +216,8 @@ int main(){
  active_core=6;assert(!ui16_hw_save_crt(crt_rom_identity,{})&&save_calls==2);
  active_core=1;core_running=false;assert(!ui16_hw_save_crt(crt_rom_identity,{})&&save_calls==2);
  core_running=true;crt_stage1_capable=false;assert(!ui16_hw_save_crt(crt_rom_identity,{})&&save_calls==2);
+ assert(storage_depth==0);lease_available=false;
+ assert(!ui16_hw_load_rom(2,"sd:snes/a.sfc",nullptr)&&!core_running&&!crt_rom_identity.valid&&!snes_crt_readonly);
  std::puts("Actual main.cpp adapters passed: stat/program/ID timeout/load state, display ownership, unmodified X/Y game HID, OSD chord, neutral packets");
 }
 '''
@@ -196,7 +227,7 @@ if os.name=='nt':
     converted=subprocess.check_output(['cygpath','-m','/ucrt64/bin'],text=True,encoding='utf-8').strip()
     extra=['-B'+converted+'/']
 exe=build/('launch_adapters_test.exe' if os.name=='nt' else 'launch_adapters_test')
-subprocess.run(['g++',*extra,'-DUI16_SYSTEM_MENU','-std=c++17','-Wall','-Wextra','-Werror','-pedantic','-I'+str(ROOT/'ui'),str(path),'-o',str(exe)],check=True)
+subprocess.run(['g++',*extra,'-DUI16_SYSTEM_MENU','-std=c++17','-Wall','-Wextra','-Werror','-pedantic','-I'+str(ROOT/'ui'),'-I'+str(ROOT/'utils'),str(path),'-o',str(exe)],check=True)
 subprocess.run([str(exe)],check=True)
 
 
@@ -270,6 +301,7 @@ bool ui16_hw_osd_ready(void *);
 bool ui16_hw_starting(void *);
 void overlay_osd_window(unsigned,unsigned,unsigned,unsigned);
 extern bool crt_stage1_capable,restart_capable,core_running;
+extern bool snes_crt_readonly;
 extern int active_core;
 void fpga_tx_header(int,int);
 #define DEBUG(...) ((void)0)

@@ -7,6 +7,8 @@ if command -v cygpath >/dev/null 2>&1; then
   extra+=("-B$(cygpath -m /ucrt64/bin)/")
   export MSYS2_ARG_CONV_EXCL='*'
 fi
-g++ "${extra[@]}" -std=c++17 -Wall -Wextra -Werror -pedantic -DUI16_SYSTEM_MENU \
+for system in 1 2; do
+g++ "${extra[@]}" -std=c++17 -Wall -Wextra -Werror -pedantic -DUI16_SYSTEM_MENU -DTEST_CRT_SYSTEM="$system" \
  -Itests/ui16 -Iui tests/ui16/crt_restore_test.cpp ui/ui16_crt_restore.cpp ui/ui16_rom_id.cpp -o build-ui16-host/crt_restore_test
 ./build-ui16-host/crt_restore_test
+done

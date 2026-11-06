@@ -47,6 +47,7 @@ extern "C" {
 #include "ui16_crt_restore_reader.h"
 #include "ui16_crt_save.h"
 #include "ui16_crt_defaults_reader.h"
+#include "tc_snes_sd_guard.h"
 #ifdef UI16_SD_FONT
 #include "ui16_font_cache.h"
 #ifdef UI16_RELIABLE_FONT
@@ -114,6 +115,22 @@ int __attribute__((weak)) putchar(int ch) {
 USB_NOCACHE_RAM_SECTION FATFS fs;
 USB_NOCACHE_RAM_SECTION FIL fcore;
 USB_NOCACHE_RAM_SECTION BYTE __attribute__((aligned(64))) fbuf[BLOCK_SIZE];
+
+// Application storage ownership BEGIN (also compiled with host substitutes).
+static SemaphoreHandle_t storage_mutex;
+struct TcStorageLease {
+    bool owned;
+    TcStorageLease():owned(storage_mutex&&xSemaphoreTake(storage_mutex,portMAX_DELAY)==pdTRUE){}
+    ~TcStorageLease(){if(owned)xSemaphoreGive(storage_mutex);}
+    explicit operator bool()const{return owned;}
+    TcStorageLease(const TcStorageLease &)=delete;
+    TcStorageLease &operator=(const TcStorageLease &)=delete;
+};
+static bool pcxt_disk_owner(){return core_running&&active_core==6;}
+// CPU-only UART staging. FatFs/DMA still use aligned, noncacheable fbuf under
+// the lease; a partial packet can never overwrite a JTAG/ROM/CRT transfer.
+static uint8_t floppy_packet[512];
+// Application storage ownership END.
 
 FRESULT res_sd;
 FileChooser file_chooser;
@@ -374,6 +391,7 @@ static void uart1_rx_task(void *pvParameters)
     uint16_t pos = 0;
     uint8_t type = 0;
     uint16_t len = 0;
+    uint16_t discard_payload = 0;
 
 #ifdef UI16_SYSTEM_MENU
     char osd_tag[7]={};
@@ -384,7 +402,8 @@ static void uart1_rx_task(void *pvParameters)
         uint8_t ch=0;
         int received;
         while ((received=uart1_rx_take(&ch))!=0) {
-            if(received<0){pos=0;continue;}
+            if(received<0){pos=0;discard_payload=0;continue;}
+            if(discard_payload){--discard_payload;continue;}
 
             if (pos == 0) {          // expecting 0xAA
                 if (ch == 0xAA)
@@ -398,6 +417,12 @@ static void uart1_rx_task(void *pvParameters)
             } else if (pos == 3) {   // command type
                 type = ch;
                 pos++;
+                // Reject disk packets before touching shared storage, consuming
+                // their payload so embedded 0xAA bytes cannot become commands.
+                if((type==4||type==5)&&
+                   (len!=(type==4?515:3)||!pcxt_disk_owner())){
+                    discard_payload=len>0&&len<=1024?len-1:0;pos=0;continue;
+                }
 #ifdef UI16_RELIABLE_FONT
                 if(type==0x16 && len!=15)pos=0;
 #endif
@@ -463,14 +488,16 @@ static void uart1_rx_task(void *pvParameters)
                 if (pos < 6)
                     buffer[pos-4] = ch;
                 else
-                    fbuf[pos-6] = ch;
+                    floppy_packet[pos-6] = ch;
                 if (pos == 6+511) {
                     uint16_t drive = buffer[0] >> 7;
                     uint16_t sector = (buffer[0] & 0x7f) << 8 | buffer[1];
-                    if (floppy[drive]) {
+                    TcStorageLease lease;
+                    if (lease && pcxt_disk_owner() && floppy[drive]) {
                         UINT br;
-                        f_lseek(&f_floppy[drive], sector * 512);
-                        if (f_write(&f_floppy[drive], fbuf, 512, &br) != FR_OK) {
+                        memcpy(fbuf,floppy_packet,512);
+                        if (f_lseek(&f_floppy[drive], sector * 512) != FR_OK ||
+                            f_write(&f_floppy[drive], fbuf, 512, &br) != FR_OK || br != 512) {
                             overlay_status("Failed to write floppy");
                         }
                     }
@@ -482,10 +509,11 @@ static void uart1_rx_task(void *pvParameters)
                 if (pos == 5) {
                     uint16_t drive = buffer[0] >> 7;
                     uint16_t sector = (buffer[0] & 0x7f) << 8 | buffer[1];
-                    if (floppy[drive]) {
+                    TcStorageLease lease;
+                    if (lease && pcxt_disk_owner() && floppy[drive]) {
                         UINT br;
-                        f_lseek(&f_floppy[drive], sector * 512);
-                        if (f_read(&f_floppy[drive], fbuf, 512, &br) == FR_OK) {
+                        if (f_lseek(&f_floppy[drive], sector * 512) == FR_OK &&
+                            f_read(&f_floppy[drive], fbuf, 512, &br) == FR_OK && br == 512) {
                             fpga_tx_header(0x0a, br+1);
                             for (UINT i = 0; i < br; i++) {
                                 fpga_tx_byte(fbuf[i]);
@@ -523,24 +551,31 @@ static bool ui16_hw_osd_ready(void *)
 static Ui16RomIdentity crt_rom_identity;
 static Ui16CrtRestore crt_restore;
 static Ui16CrtDefaults crt_defaults;
+static bool snes_crt_readonly=false;
 // Only the validated NES path owns these resources without background disk I/O.
 static bool ui16_hw_save_crt(const Ui16RomIdentity &identity,const Ui16CrtSettings &value,bool reset=false){
     if(!core_running||active_core!=1||!crt_stage1_capable||identity.system!=1)return false;
+    TcStorageLease lease;if(!lease)return false;
     return ui16_save_crt_override(identity,value,fcore,fbuf,BLOCK_SIZE,reset);
 }
 static bool ui16_hw_file_ready(const char *path,void *)
 {
+    TcStorageLease lease;if(!lease)return false;
     FILINFO info{};
     return f_stat(path,&info)==FR_OK&&!(info.fattrib&AM_DIR)&&info.fsize>0;
 }
 static bool ui16_hw_find_core(const char *name,std::string &path,void *)
 {
-    return find_core_for_board(path,name)&&ui16_hw_file_ready(path.c_str(),nullptr);
+    TcStorageLease lease;if(!lease)return false;
+    FILINFO info{};
+    return find_core_for_board(path,name)&&f_stat(path.c_str(),&info)==FR_OK&&!(info.fattrib&AM_DIR)&&info.fsize>0;
 }
 static bool ui16_hw_program(const char *path,void *)
 {
     core_running=false;active_core=-1;
     crt_rom_identity={};crt_restore={};crt_defaults={};
+    snes_crt_readonly=false;
+    TcStorageLease lease;if(!lease)return false;
     extern bool gba_bios_loaded,gba_missing_bios_warned;
     gba_bios_loaded=false;gba_missing_bios_warned=false;
     const bool ok=fpga_program(path);
@@ -564,17 +599,26 @@ static bool ui16_hw_load_rom(int id,const char *path,void *)
     auto *target=find_core_by_id(id);
     core_running=false;
     crt_rom_identity={};crt_restore={};crt_defaults={};
+    snes_crt_readonly=false;
+    TcStorageLease lease;if(!lease)return false;
+    const bool snes_sd=id==2&&path&&strncmp(path,"sd:",3)==0;
+    TcSnesSdScope sd_scope(snes_sd);
+    if(tc_snes_sd_faulted())return false;
     if(!target||!target->load_rom)return false;
-    if(crt_stage1_capable&&id==1){
+    if(crt_stage1_capable&&(id==1||snes_sd)){
         overlay_status("Reading ROM ID...");
         // The JTAG phase has finished. Reuse the noncacheable loader resources
         // sequentially; identify_rom closes the read-only file before load_rom.
         crt_rom_identity=ui16_identify_rom(id,path,fcore,fbuf,BLOCK_SIZE,[](){delay(1);});
+        if(tc_snes_sd_faulted()){crt_rom_identity={};return false;}
         crt_restore=ui16_read_crt_override(crt_rom_identity,fcore,fbuf,BLOCK_SIZE);
+        if(tc_snes_sd_faulted()){crt_rom_identity={};crt_restore={};return false;}
         crt_defaults=ui16_read_crt_defaults(id,path,fcore,fbuf,BLOCK_SIZE);
+        if(tc_snes_sd_faulted()){crt_rom_identity={};crt_restore={};crt_defaults={};return false;}
     }
     const int result=target->load_rom(path);
     if(result!=0||!core_running){core_running=false;crt_rom_identity={};crt_restore={};crt_defaults={};return false;}
+    snes_crt_readonly=crt_stage1_capable&&snes_sd;
     overlay(0);return true;
 }
 static void ui16_hw_display_owner(bool ui16,void *)
@@ -728,7 +772,10 @@ static void main_task(void *pvParameters)
                     // Preserve normal game input; the UI button assignment is not a game remap.
                     ui16_wait_release();
                     if(crt_stage1_capable){
-                        if(request.core_id==2)ui16_crt_preview_session();
+                        if(request.core_id==2){
+                            if(snes_crt_readonly)ui16_crt_readonly_session(request.crt_recommendation,crt_rom_identity,crt_restore,crt_defaults);
+                            else ui16_crt_preview_session(); // USB ROM storage stays volatile in S4a.
+                        }
                         else ui16_crt_new_session(request.crt_recommendation,crt_rom_identity,crt_restore,ui16_hw_save_crt,crt_defaults);
                     }
                     for(;;){
@@ -949,6 +996,8 @@ int main(void)
 
     // Create mutex for joypad states
     state_mutex = xSemaphoreCreateMutex();
+    storage_mutex = xSemaphoreCreateMutex();
+    configASSERT(storage_mutex!=nullptr);
 
     overlay_status("Initializing SDH...");
     fatfs_sdh_driver_register();        // calls SDH_Init()

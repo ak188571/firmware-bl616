@@ -31,3 +31,7 @@ void ui16_crt_new_session(const Ui16CrtRecommendation &recommended={},const Ui16
 void ui16_crt_accept_status(std::uint32_t applied);
 // SNES stages 1/2: builtin OFF baseline, volatile preview, no storage access.
 void ui16_crt_preview_session();
+// SNES SD stage4a: resolve read-only metadata, preview and cancel to initial;
+// SAVE/RESET remain unavailable regardless of identity/restore state.
+void ui16_crt_readonly_session(const Ui16CrtRecommendation &recommended,const Ui16RomIdentity &rom_id,
+                             const Ui16CrtRestore &restore,const Ui16CrtDefaults &defaults);

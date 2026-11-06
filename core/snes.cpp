@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include <string.h>      // for strcasestr
+#include <limits.h>
 
 #include "utils.h"
 #include "cores.h"
@@ -12,14 +13,14 @@ int parse_snes_header(FIL *fp, int pos, int file_size, int typ, unsigned char *h
     unsigned int br;
     if (f_lseek(fp, pos))
         return 1;
-    f_read(fp, hdr, 64, &br);
-    if (br != 64) return 1;
+    if (f_read(fp, hdr, 64, &br) != FR_OK || br != 64) return 1;
     int mc = hdr[21];
     int rom = hdr[23];
     int ram = hdr[24];
     int checksum = (hdr[28] << 8) + hdr[29];
     int checksum_compliment = (hdr[30] << 8) + hdr[31];
     int reset = (hdr[61] << 8) + hdr[60];
+    if (rom >= 14 || ram > 7) return 1; // Validate before shifting untrusted header data.
     int size2 = 1024 << rom;
 
     overlay_status("size=%d", size2);
@@ -58,6 +59,7 @@ int parse_snes_header(FIL *fp, int pos, int file_size, int typ, unsigned char *h
 // return 0 if successful
 int loadsnes(const char *fname) {
     int r = 1;
+    core_running = false;
     DEBUG("loadsnes start");
 
     // check extension .sfc or .smc
@@ -75,11 +77,15 @@ int loadsnes(const char *fname) {
         return r;
     }
     unsigned int br, total = 0;
-    int size = get_file_size(fname);
+    const FSIZE_t raw_size = f_size(&fcore);
+    int size = raw_size <= INT_MAX ? static_cast<int>(raw_size) : 0;
+    bool loading_started = false;
+    FRESULT closed;
     int map_ctrl, rom_type_header, rom_size, ram_size, company;
     // parse SNES header from ROM file
     int off = size & 0x3ff;		// rom header (0 or 512)
     int header_pos;
+    if (!size || (off != 0 && off != 512)) {r=1;goto loadsnes_close_file;}
     overlay_status("snes rom header offset: %d\n", off);
     
     header_pos = 0x7fc0 + off;
@@ -90,6 +96,7 @@ int loadsnes(const char *fname) {
             if (parse_snes_header(&fcore, header_pos, size-off, 2, fbuf, &map_ctrl, &rom_type_header, &rom_size, &ram_size, &company)) {
                 overlay_status("Not a SNES ROM file");
                 delay(200);
+                r = 1;
                 goto loadsnes_close_file;
             }
         }
@@ -97,7 +104,7 @@ int loadsnes(const char *fname) {
 
     // load actual ROM
     set_loading_state(1);		// enable game loading, this resets SNES
-    core_running = false;
+    loading_started = true;
 
     // Send 64-byte header to snes
     send_fbuf_data(64);
@@ -107,10 +114,11 @@ int loadsnes(const char *fname) {
         overlay_status("Seek failure");
         goto loadsnes_snes_end;
     }
-    do {
-        if ((r = f_read(&fcore, fbuf, 1024, &br)) != FR_OK)
-            break;
-        if (br == 0) break;
+    while (total < static_cast<unsigned>(size-off)) {
+        const UINT remaining = static_cast<unsigned>(size-off)-total;
+        const UINT wanted = remaining < 1024 ? remaining : 1024;
+        if ((r = f_read(&fcore, fbuf, wanted, &br)) != FR_OK)goto loadsnes_snes_end;
+        if (br != wanted) {r=1;goto loadsnes_snes_end;}
         send_fbuf_data(br);
         total += br;
         if ((total & 0xffff) == 0) {	// display progress every 64KB
@@ -124,16 +132,18 @@ int loadsnes(const char *fname) {
             //              01234567890123456789012345678901
             overlay_printf(" ROM=%d RAM=%d                 ", 1 << rom_size, ram_size ? (1 << ram_size) : 0);
         }
-    } while (br == 1024);
-
-    overlay_status("Success");
-    core_running = true;
-
-    overlay(0);		// turn off OSD
+    }
+    r = 0;
 
 loadsnes_snes_end:
-    set_loading_state(0);	// turn off game loading, this starts SNES
 loadsnes_close_file:
-    f_close(&fcore);
+    closed = f_close(&fcore);
+    if (r == 0 && closed != FR_OK)r=closed;
+    if (loading_started)set_loading_state(0);
+    if (r == 0) {
+        core_running = true;
+        overlay_status("Success");
+        overlay(0);
+    }
     return r;
 }

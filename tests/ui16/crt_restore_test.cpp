@@ -15,8 +15,11 @@ static unsigned active=0,closes=0;
 static bool early=false,oversize=false;
 static FIL file;
 alignas(64) static std::array<unsigned char,8192> buffer;
-static Ui16RomIdentity id{true,Ui16RomVolume::Sd,1,0x7623dffd,65552};
-static const std::string prefix="sd:/crt/01-7623dffd-0000000000010010";
+#ifndef TEST_CRT_SYSTEM
+#define TEST_CRT_SYSTEM 1
+#endif
+static Ui16RomIdentity id{true,Ui16RomVolume::Sd,TEST_CRT_SYSTEM,0x7623dffd,65552};
+static const std::string prefix=std::string("sd:/crt/0")+char('0'+TEST_CRT_SYSTEM)+"-7623dffd-0000000000010010";
 extern "C" FRESULT f_open(FIL *f,const char *path,unsigned char mode){
     assert(!active&&f==&file&&mode==FA_READ);paths.push_back(path);current=path;
     if(current==open_error)return FR_DISK_ERR;
@@ -36,7 +39,7 @@ extern "C" FRESULT f_close(FIL *f){assert(active==1&&f==&file);--active;++closes
 static void put(Bytes &r,unsigned at,std::uint64_t v,unsigned n){for(unsigned i=0;i<n;++i)r[at+i]=static_cast<unsigned char>(v>>(8*i));}
 static void crc(Bytes &r){put(r,28,ui16_rom_crc(0xffffffffu,r.data(),28)^0xffffffffu,4);}
 static Bytes record(std::uint32_t generation=1,unsigned kind=0,unsigned value=31){
-    Bytes r(32);r[0]='C';r[1]='R';r[2]='T';r[3]='1';r[4]=1;r[5]=1;r[6]=static_cast<unsigned char>(kind);
+    Bytes r(32);r[0]='C';r[1]='R';r[2]='T';r[3]='1';r[4]=1;r[5]=TEST_CRT_SYSTEM;r[6]=static_cast<unsigned char>(kind);
     put(r,8,id.crc,4);put(r,12,id.size,8);r[20]=static_cast<unsigned char>(value);put(r,24,generation,4);crc(r);return r;
 }
 static Ui16CrtRestore read(const Ui16RomIdentity &identity=id){
@@ -78,6 +81,6 @@ int main(){
     other=id;other.size=0;assert(read(other).state==Ui16CrtReadState::NoId&&paths.empty());
     assert(ui16_read_crt_override(id,file,buffer.data(),32).state==Ui16CrtReadState::NoId&&paths.empty());
     other=id;other.volume=Ui16RomVolume::Usb;assert(read(other).state==Ui16CrtReadState::Missing&&paths[0].find("usb:/crt/")==0);
-    setup();other=id;other.system=2;assert(read(other).state==Ui16CrtReadState::Missing&&paths[0].find("/02-")!=std::string::npos);
+    setup();other=id;other.system=TEST_CRT_SYSTEM==1?2:1;assert(read(other).state==Ui16CrtReadState::Missing&&paths[0].find(TEST_CRT_SYSTEM==1?"/02-":"/01-")!=std::string::npos);
     std::puts("CRT restore PASS: read-only aligned buffers, two generations/wrap/tombstones, explicit OFF, whole record integrity, schema/key/reserved validation, corrupt sibling recovery, I/O/future/conflict fallback, volume/system separation");
 }

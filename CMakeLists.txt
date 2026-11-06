@@ -54,6 +54,10 @@ elseif(TANG_BOARD STREQUAL "nano20k")
 endif()
 
 find_package(bouffalo_sdk REQUIRED HINTS $ENV{BL_SDK_BASE})
+if(UI16_SYSTEM_MENU AND CHIP STREQUAL "bl616")
+    # Keep the SDK immutable; wrap the two FatFs SDH entry points in this app.
+    sdk_add_link_options("-Wl,--wrap=SDH_ReadMultiBlocks" "-Wl,--wrap=SDH_WriteMultiBlocks")
+endif()
 
 # Add include directories
 sdk_add_include_directories(

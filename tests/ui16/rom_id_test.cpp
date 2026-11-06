@@ -70,5 +70,12 @@ int main(){
     setup(rom);assert(!identify(0).valid&&opens==0);assert(!identify(256).valid&&opens==0);assert(!identify(1,nullptr).valid&&opens==0);
     FIL file{};assert(!ui16_identify_rom(1,"sd:x.nes",file,nullptr,8192).valid);assert(!ui16_identify_rom(1,"sd:x.nes",file,buffer.data(),0).valid);
     assert(!Ui16RomIdentity{}.same_game(Ui16RomIdentity{}));
+    // SNES system 2 includes the optional copier header in its raw identity.
+    std::vector<unsigned char> snes(32768);for(std::size_t i=0;i<snes.size();i++)snes[i]=static_cast<unsigned char>(i*37+11);
+    setup(snes);const auto plain=identify(2,"sd:snes/raw.sfc");
+    assert(plain.valid&&plain.system==2&&plain.size==32768&&plain.crc==0xee1ebc69u); // Python zlib reference.
+    snes.insert(snes.begin(),512,0xa5);setup(snes);const auto copier=identify(2,"sd:snes/copier.smc");
+    assert(copier.valid&&copier.size==33280&&copier.crc==0x8541f1dcu&&!copier.same_game(plain));
+    for(unsigned at:{0u,511u,512u,33279u}){setup(snes);bytes[at]^=1;assert(!copier.same_game(identify(2,"sd:snes/copier.smc")));}
     std::puts("ROM ID PASS: IEEE vector, full-file/header/trainer/tail hash, chunk independence, rename/system/volume separation, exact size, read-only buffers/yield, all I/O failures and stale identity rejection");
 }

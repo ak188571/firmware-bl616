@@ -257,6 +257,31 @@ int main(){
     assert(!preset_menu->on_choose(4)&&config==recommended.settings.merge(preserved));
     broken_defaults=system_defaults;broken_defaults.recommendation.settings.blur=4;
     ui16_crt_new_session({},rom_id,{},save_test,broken_defaults);assert(config==preserved);
+    // SNES SD stage4a resolves startup values but owns no write/reset action.
+    auto snes_id=rom_id;snes_id.system=2;
+    const auto before_readonly=saves;
+    for(bool user:{false,true}){
+        ui16_crt_readonly_session(recommended,snes_id,user?saved:Ui16CrtRestore{},system_defaults);
+        std::unique_ptr<Menu> ro(ui16_create_crt_menu(true,true));
+        const auto baseline=config;
+        assert(baseline==(user?saved.override_value.settings:recommended.settings).merge(preserved));
+        assert((ro->get_options()==std::vector<int>{3,4,5}));
+        assert(!ro->on_choose(3)&&!ro->on_choose(4)&&saves==before_readonly&&config==baseline);
+        ui16_osd_capture_begin();ro->render();ui16_osd_capture_end();
+        const auto &frame=ui16_osd_canvas().cells;
+        assert(std::string(frame.data(),32).find("SNES CRT READ ONLY")!=std::string::npos);
+        assert(std::string(frame.data()+32,32).find("READ ONLY")!=std::string::npos);
+        assert(std::string(frame.data()+2*32,32).find(user?"USER":"CSV")!=std::string::npos);
+        assert(std::string(frame.data()+8*32,32).find("UNAVAILABLE")==std::string::npos);
+        assert(std::string(frame.data()+11*32,32).find("DEFAULTS: OK")!=std::string::npos);
+        assert(!ro->inline_choice(3)&&!ro->inline_choice(4));
+        assert(ro->on_adjust(2,1)&&config!=baseline);
+        assert(ro->on_close()&&config==baseline&&saves==before_readonly);
+    }
+    ui16_crt_readonly_session({},snes_id,{},system_defaults);
+    assert(config==system_defaults.recommendation.settings.merge(preserved));
+    ui16_crt_readonly_session(recommended,rom_id,saved,system_defaults); // Cross-system identity rejected.
+    assert(config==recommended.settings.merge(preserved));
     // SNES stage1 has no storage identity, recommendation, or save actions.
     const auto saves_before_preview=saves;
     ui16_crt_preview_session();assert(config==preserved);
