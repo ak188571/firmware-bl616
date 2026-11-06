@@ -34,7 +34,7 @@ struct CrtMenu:Menu {
     bool matched=false;
     int osd_width()const override{return 23;}
     void render()override {
-        overlay_clear();overlay_cursor(0,0);overlay_printf("%s",scan_supported?"CRT DEFAULTS - STAGE5G":blur_supported?"H BLUR READY - STAGE4A":"BYPASS ONLY - STAGE 1");
+        overlay_clear();overlay_cursor(0,0);overlay_printf("%s",preview_only&&blur_supported?"SNES CRT PREVIEW":scan_supported?"CRT DEFAULTS - STAGE5G":blur_supported?"H BLUR READY - STAGE4A":"BYPASS ONLY - STAGE 1");
         overlay_cursor(0,1);overlay_printf("SAVE: %s",preview_only?"UNAVAILABLE":save_failed?"FAILED":dirty()?"UNSAVED":(saved_user||persisted_reset)?"SAVED":"RECOMMENDED");
         overlay_cursor(0,2);overlay_printf("INITIAL: %s",restored.override_value.present?"USER":recommended_source);
         overlay_cursor(0,3);overlay_printf("%s %s",blur_supported?"CRT ENABLE  ":"CRT REQUEST ",settings.enabled?"ON":"OFF");
@@ -50,7 +50,7 @@ struct CrtMenu:Menu {
         overlay_cursor(0,10);overlay_printf("%s",preview_only?"RESET: NOT AVAILABLE":"RESET TO RECOMMENDED");
         overlay_cursor(0,11);overlay_printf("DEFAULTS: %s",ui16_crt_defaults_state_name(defaults_snapshot.state));
     }
-    std::vector<int> get_options()override{if(preview_only)return {3,4,5};if(blur_supported&&!scan_supported)return {3,4,9,10};return {3,4,5,9,10};}
+    std::vector<int> get_options()override{if(preview_only){if(blur_supported&&!scan_supported)return {3,4};return {3,4,5};}if(blur_supported&&!scan_supported)return {3,4,9,10};return {3,4,5,9,10};}
     bool on_adjust(int row,int delta)override {
         if(row==0)settings.enabled=!settings.enabled;
         else if(row==1)settings.blur=(settings.blur+(delta>0?1:3))%4;
@@ -64,8 +64,8 @@ struct CrtMenu:Menu {
         reset_preview=persisted_reset;save_failed=false;return true;
     }
     bool on_choose(int row)override {
-        if(preview_only&&row>=3)return false;
         const int save_row=(blur_supported&&!scan_supported)?2:3;
+        if(preview_only&&row>=save_row)return false;
         if(row==save_row+1){
             settings=session_recommended;reset_preview=true;save_failed=false;
             matched=false;send_settings();redraw=true;return false;
@@ -78,7 +78,7 @@ struct CrtMenu:Menu {
         }
         on_adjust(row,1);redraw=true;return false;
     }
-    bool inline_choice(int row)const override{const int save_row=(blur_supported&&!scan_supported)?2:3;return row<save_row||row==save_row+1;}
+    bool inline_choice(int row)const override{const int save_row=(blur_supported&&!scan_supported)?2:3;return row<save_row||(!preview_only&&row==save_row+1);}
     bool on_tick(std::uint32_t now)override {
         bool seen;std::uint32_t value;
         taskENTER_CRITICAL();seen=status_seen;value=applied_status;taskEXIT_CRITICAL();

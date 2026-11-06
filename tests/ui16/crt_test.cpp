@@ -272,6 +272,15 @@ int main(){
     assert(preview->on_close()&&config==preserved);
     // Reopening stays volatile; returning to NES restores its existing policy.
     preview.reset(ui16_create_crt_menu());assert((preview->get_options()==std::vector<int>{3,4,5}));
+    preview.reset(ui16_create_crt_menu(true,false));
+    assert((preview->get_options()==std::vector<int>{3,4}));
+    assert(!preview->on_adjust(2,1)&&!preview->on_choose(2)&&!preview->on_choose(3));
+    assert(config==preserved&&saves==saves_before_preview);
+    ui16_osd_capture_begin();preview->render();ui16_osd_capture_end();
+    assert(std::string(ui16_osd_canvas().cells.data(),32).find("SNES CRT PREVIEW")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+5*32,32).find("NOT YET")!=std::string::npos);
+    assert(preview->on_adjust(0,1)&&preview->on_adjust(1,1));
+    assert(preview->on_close()&&config==preserved&&saves==saves_before_preview);
     ui16_crt_new_session(recommended,rom_id,saved,save_test,system_defaults);
     preview.reset(ui16_create_crt_menu(true,true));
     assert((preview->get_options()==std::vector<int>{3,4,5,9,10}));
