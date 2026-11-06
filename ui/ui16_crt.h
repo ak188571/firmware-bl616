@@ -35,3 +35,6 @@ void ui16_crt_preview_session();
 // SAVE/RESET remain unavailable regardless of identity/restore state.
 void ui16_crt_readonly_session(const Ui16CrtRecommendation &recommended,const Ui16RomIdentity &rom_id,
                              const Ui16CrtRestore &restore,const Ui16CrtDefaults &defaults);
+// SNES SD stage4b: explicit USER SAVE only; recommended Reset remains disabled.
+void ui16_crt_snes_save_session(const Ui16CrtRecommendation &recommended,const Ui16RomIdentity &rom_id,
+                              const Ui16CrtRestore &restore,Ui16CrtSaveFn save,const Ui16CrtDefaults &defaults);

@@ -11,8 +11,11 @@ using Bytes=std::vector<unsigned char>;
 static std::map<std::string,Bytes> files;
 static FIL file;
 alignas(64) static std::array<unsigned char,8192> buffer;
-static Ui16RomIdentity id{true,Ui16RomVolume::Sd,1,0x7623dffd,65552};
-static const std::string prefix="sd:/crt/01-7623dffd-0000000000010010";
+#ifndef TEST_CRT_SYSTEM
+#define TEST_CRT_SYSTEM 1
+#endif
+static Ui16RomIdentity id{true,Ui16RomVolume::Sd,TEST_CRT_SYSTEM,0x7623dffd,65552};
+static const std::string prefix=std::string("sd:/crt/0")+char('0'+TEST_CRT_SYSTEM)+"-7623dffd-0000000000010010";
 static std::string path,fault;
 static bool active=false,writing=false;
 static unsigned writes=0,syncs=0,mkdirs=0,opens=0;
@@ -54,7 +57,7 @@ extern "C" FRESULT f_mkdir(const char *name){assert(!active&&std::string(name)==
 static void put(Bytes &r,unsigned at,std::uint64_t v,unsigned n){for(unsigned i=0;i<n;++i)r[at+i]=static_cast<unsigned char>(v>>(8*i));}
 static void crc(Bytes &r){put(r,28,ui16_rom_crc(0xffffffffu,r.data(),28)^0xffffffffu,4);}
 static Bytes record(std::uint32_t generation=7,unsigned value=23){
-    Bytes r(32);r[0]='C';r[1]='R';r[2]='T';r[3]='1';r[4]=1;r[5]=1;
+    Bytes r(32);r[0]='C';r[1]='R';r[2]='T';r[3]='1';r[4]=1;r[5]=TEST_CRT_SYSTEM;
     put(r,8,id.crc,4);put(r,12,id.size,8);r[20]=static_cast<unsigned char>(value);put(r,24,generation,4);crc(r);return r;
 }
 static void setup(){assert(!active);files.clear();fault.clear();writes=syncs=mkdirs=opens=0;targets.clear();}

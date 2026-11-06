@@ -551,12 +551,19 @@ static bool ui16_hw_osd_ready(void *)
 static Ui16RomIdentity crt_rom_identity;
 static Ui16CrtRestore crt_restore;
 static Ui16CrtDefaults crt_defaults;
-static bool snes_crt_readonly=false;
-// Only the validated NES path owns these resources without background disk I/O.
+static bool snes_crt_sd_session=false;
+// Preserve NES policy; SNES SD writes require the successfully loaded identity.
 static bool ui16_hw_save_crt(const Ui16RomIdentity &identity,const Ui16CrtSettings &value,bool reset=false){
-    if(!core_running||active_core!=1||!crt_stage1_capable||identity.system!=1)return false;
+    if(!core_running||!crt_stage1_capable)return false;
+    const bool nes=active_core==1&&identity.system==1;
+    const bool snes=active_core==2&&snes_crt_sd_session&&identity.system==2&&
+        identity.volume==Ui16RomVolume::Sd&&identity.same_game(crt_rom_identity)&&!reset;
+    if(!nes&&!snes)return false;
     TcStorageLease lease;if(!lease)return false;
-    return ui16_save_crt_override(identity,value,fcore,fbuf,BLOCK_SIZE,reset);
+    if(snes&&tc_snes_sd_faulted())return false;
+    TcSnesSdScope sd_scope(snes);
+    const bool ok=ui16_save_crt_override(identity,value,fcore,fbuf,BLOCK_SIZE,reset);
+    return ok&&(!snes||!tc_snes_sd_faulted());
 }
 static bool ui16_hw_file_ready(const char *path,void *)
 {
@@ -574,7 +581,7 @@ static bool ui16_hw_program(const char *path,void *)
 {
     core_running=false;active_core=-1;
     crt_rom_identity={};crt_restore={};crt_defaults={};
-    snes_crt_readonly=false;
+    snes_crt_sd_session=false;
     TcStorageLease lease;if(!lease)return false;
     extern bool gba_bios_loaded,gba_missing_bios_warned;
     gba_bios_loaded=false;gba_missing_bios_warned=false;
@@ -599,7 +606,7 @@ static bool ui16_hw_load_rom(int id,const char *path,void *)
     auto *target=find_core_by_id(id);
     core_running=false;
     crt_rom_identity={};crt_restore={};crt_defaults={};
-    snes_crt_readonly=false;
+    snes_crt_sd_session=false;
     TcStorageLease lease;if(!lease)return false;
     const bool snes_sd=id==2&&path&&strncmp(path,"sd:",3)==0;
     TcSnesSdScope sd_scope(snes_sd);
@@ -618,7 +625,7 @@ static bool ui16_hw_load_rom(int id,const char *path,void *)
     }
     const int result=target->load_rom(path);
     if(result!=0||!core_running){core_running=false;crt_rom_identity={};crt_restore={};crt_defaults={};return false;}
-    snes_crt_readonly=crt_stage1_capable&&snes_sd;
+    snes_crt_sd_session=crt_stage1_capable&&snes_sd;
     overlay(0);return true;
 }
 static void ui16_hw_display_owner(bool ui16,void *)
@@ -773,7 +780,7 @@ static void main_task(void *pvParameters)
                     ui16_wait_release();
                     if(crt_stage1_capable){
                         if(request.core_id==2){
-                            if(snes_crt_readonly)ui16_crt_readonly_session(request.crt_recommendation,crt_rom_identity,crt_restore,crt_defaults);
+                            if(snes_crt_sd_session)ui16_crt_snes_save_session(request.crt_recommendation,crt_rom_identity,crt_restore,ui16_hw_save_crt,crt_defaults);
                             else ui16_crt_preview_session(); // USB ROM storage stays volatile in S4a.
                         }
                         else ui16_crt_new_session(request.crt_recommendation,crt_rom_identity,crt_restore,ui16_hw_save_crt,crt_defaults);

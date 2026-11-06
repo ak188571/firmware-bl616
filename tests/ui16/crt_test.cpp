@@ -282,6 +282,38 @@ int main(){
     assert(config==system_defaults.recommendation.settings.merge(preserved));
     ui16_crt_readonly_session(recommended,rom_id,saved,system_defaults); // Cross-system identity rejected.
     assert(config==recommended.settings.merge(preserved));
+    // S4b enables explicit USER SAVE without exposing recommended Reset.
+    ui16_crt_snes_save_session(recommended,snes_id,saved,save_test,system_defaults);
+    std::unique_ptr<Menu> snes_menu(ui16_create_crt_menu(true,true));
+    const auto before_snes_save=saves;const auto snes_initial=config;
+    assert((snes_menu->get_options()==std::vector<int>{3,4,5,9}));
+    assert(!snes_menu->on_choose(4)&&!snes_menu->inline_choice(4)&&config==snes_initial);
+    ui16_osd_capture_begin();snes_menu->render();ui16_osd_capture_end();
+    assert(std::string(ui16_osd_canvas().cells.data(),32).find("SNES CRT SAVE - S4B")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+10*32,32).find("NOT AVAILABLE")!=std::string::npos);
+    assert(snes_menu->on_adjust(1,1));_overlay_on=1;save_ok=true;
+    assert(!snes_menu->on_choose(3)&&saves==before_snes_save+1&&!saved_reset&&overlay_on());
+    const auto snes_success=config;
+    assert(!snes_menu->on_choose(3)&&saves==before_snes_save+1); // Same USER value does not write again.
+    assert(snes_menu->on_adjust(2,1));save_ok=false;
+    assert(!snes_menu->on_choose(3)&&saves==before_snes_save+2&&overlay_on());
+    ui16_osd_capture_begin();snes_menu->render();ui16_osd_capture_end();
+    assert(std::string(ui16_osd_canvas().cells.data()+32,32).find("FAILED")!=std::string::npos);
+    assert(snes_menu->on_close()&&config==snes_success); // Failed SAVE cancels to last confirmed value.
+    assert(snes_menu->on_adjust(2,1));save_ok=true;
+    assert(!snes_menu->on_choose(3)&&saves==before_snes_save+3&&!saved_reset);
+    assert(!snes_menu->on_choose(4));
+    for(unsigned bad=0;bad<4;bad++){
+        auto rejected=snes_id;
+        if(bad==0)rejected.valid=false;
+        if(bad==1)rejected.system=1;
+        if(bad==2)rejected.volume=Ui16RomVolume::Usb;
+        ui16_crt_snes_save_session(recommended,rejected,saved,bad==3?nullptr:save_test,system_defaults);
+        snes_menu.reset(ui16_create_crt_menu(true,true));
+        assert((snes_menu->get_options()==std::vector<int>{3,4,5}));
+        const auto no_write=saves;
+        assert(!snes_menu->on_choose(3)&&!snes_menu->on_choose(4)&&saves==no_write);
+    }
     // SNES stage1 has no storage identity, recommendation, or save actions.
     const auto saves_before_preview=saves;
     ui16_crt_preview_session();assert(config==preserved);
