@@ -15,8 +15,14 @@ struct Ui16OsdFrame {
     unsigned x=0,y=0,width=0,height=0;
 };
 const char *ui16_osd_position_name(Ui16OsdPosition);
+struct Ui16OsdStyle {
+    int minimum_width=16;
+    const char *title=nullptr;
+    const char *footer=nullptr;
+    bool short_position=false;
+};
 Ui16OsdFrame ui16_osd_layout(const Ui16OsdCanvas &,const std::vector<int> &options,
-    int selected,int &top,int &width_floor,Ui16OsdPosition position, bool movable=true, const char *title="MENU");
+    int selected,int &top,int &width_floor,Ui16OsdPosition position, bool movable=true, const char *title="MENU",const Ui16OsdStyle *style=nullptr);
 void ui16_osd_capture_begin();
 void ui16_osd_capture_end();
 bool ui16_osd_capture_active();

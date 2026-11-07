@@ -7,6 +7,7 @@
 
 // In core popup menu
 
+struct Ui16OsdStyle;
 struct Menu {
     bool redraw = false;
     virtual void do_redraw() {
@@ -17,6 +18,8 @@ struct Menu {
     virtual bool on_adjust(int,int) {return false;}
     virtual bool on_tick(std::uint32_t) {return false;}
     virtual int osd_width() const {return 0;}
+    virtual const Ui16OsdStyle *osd_style() const {return nullptr;}
+    virtual bool on_info(std::uint16_t=0x0008) {return false;}
     virtual bool fullscreen_dialog(int) const {return false;}
     virtual bool inline_choice(int) const {return false;}
     virtual void render() = 0;

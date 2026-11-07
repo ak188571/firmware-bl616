@@ -32,7 +32,7 @@ const char *ui16_osd_position_name(Ui16OsdPosition p){
     return "TOP RIGHT";
 }
 Ui16OsdFrame ui16_osd_layout(const Ui16OsdCanvas &c,const std::vector<int> &options,
-    int selected,int &top,int &width_floor,Ui16OsdPosition position,bool movable,const char *title)
+    int selected,int &top,int &width_floor,Ui16OsdPosition position,bool movable,const char *title,const Ui16OsdStyle *style)
 {
     int first=Ui16OsdCanvas::Rows-1,last=0,width=0;
     for(int y=0;y<Ui16OsdCanvas::Rows;++y)for(int x=0;x<32;++x)
@@ -45,7 +45,8 @@ Ui16OsdFrame ui16_osd_layout(const Ui16OsdCanvas &c,const std::vector<int> &opti
         const int row=options[selected];
         if(row>=first&&row<=last){if(row<top)top=row;else if(row>=top+lines)top=row-lines+1;}
     }
-    width_floor=std::min(27,std::max({width_floor,width,16}));
+    const int minimum=style?std::max(1,std::min(style->minimum_width,27)):16;
+    width_floor=std::min(27,std::max({width_floor,width,minimum}));
     Ui16OsdFrame f;f.cells.fill(' ');f.width=width_floor+3;f.height=lines+(movable?5:4);
     const auto p=position;
     f.x=(p==Ui16OsdPosition::Center)?(32-f.width)/2:
@@ -57,16 +58,17 @@ Ui16OsdFrame ui16_osd_layout(const Ui16OsdCanvas &c,const std::vector<int> &opti
     for(unsigned x=0;x<f.width;++x){put(x,0,'-');put(x,f.height-1,'-');}
     for(unsigned y=0;y<f.height;++y){put(0,y,'|');put(f.width-1,y,'|');}
     put(0,0,'+');put(f.width-1,0,'+');put(0,f.height-1,'+');put(f.width-1,f.height-1,'+');
-    text(2,1,title);
+    text(2,1,style&&style->title?style->title:title);
     for(int i=0;i<lines;++i){
         for(int x=0;x<width_floor;++x)put(x+2,i+2,c.cells[(top+i)*32+x]);
         if(selected>=0&&selected<static_cast<int>(options.size())&&options[selected]==top+i)put(1,i+2,'>');
     }
     if(movable){
-        text(2,lines+2,std::string("POS ")+ui16_osd_position_name(position));
+        static const char *const short_names[]={"C","TL","TR","BL","BR"};
+        text(2,lines+2,std::string("POS ")+(style&&style->short_position?short_names[static_cast<unsigned>(position)]:ui16_osd_position_name(position)));
         if(selected==static_cast<int>(options.size()))put(1,lines+2,'>');
     }
-    text(2,lines+(movable?3:2),"A/B OK X/Y BACK");
+    text(2,lines+(movable?3:2),style&&style->footer?style->footer:"A/B OK X/Y BACK");
     return f;
 }
 #endif

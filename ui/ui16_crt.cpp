@@ -1,5 +1,6 @@
 #ifdef UI16_SYSTEM_MENU
 #include "ui16_crt.h"
+#include "ui16_osd.h"
 #include "menu_manager.h"
 #include "utils.h"
 
@@ -13,7 +14,6 @@ Ui16CrtSettings persisted,session_recommended;
 bool persisted_reset=false,reset_preview=false;
 bool preview_only=false;
 bool read_only=false;
-bool snes_session=false;
 bool storage_actions_disabled(){return preview_only||read_only;}
 bool reset_available(){return !storage_actions_disabled();}
 bool dirty(){return settings!=persisted||reset_preview!=persisted_reset;}
@@ -28,7 +28,7 @@ void send_settings() {
     set_core_config(settings.merge(get_core_config()));
 }
 const char *strength(unsigned n) {
-    static const char *const names[]={"OFF","WEAK","STANDARD","STRONG"};
+    static const char *const names[]={"OFF","WEAK","STD","STRONG"};
     return names[n&3u];
 }
 struct CrtMenu:Menu {
@@ -36,25 +36,34 @@ struct CrtMenu:Menu {
     const bool blur_supported,scan_supported;
     std::uint32_t last_poll=0;
     bool matched=false;
-    int osd_width()const override{return 23;}
-    void render()override {
-        overlay_clear();overlay_cursor(0,0);overlay_printf("%s",snes_session?"SNES CRT SETTINGS":read_only?"SNES CRT READ ONLY":preview_only&&blur_supported?"SNES CRT PREVIEW":scan_supported?"CRT DEFAULTS - STAGE5G":blur_supported?"H BLUR READY - STAGE4A":"BYPASS ONLY - STAGE 1");
-        overlay_cursor(0,1);overlay_printf("SAVE: %s",read_only?"READ ONLY":preview_only?"UNAVAILABLE":save_failed?"FAILED":dirty()?"UNSAVED":(saved_user||persisted_reset)?"SAVED":"RECOMMENDED");
-        overlay_cursor(0,2);overlay_printf("INITIAL: %s",restored.override_value.present?"USER":recommended_source);
-        overlay_cursor(0,3);overlay_printf("%s %s",blur_supported?"CRT ENABLE  ":"CRT REQUEST ",settings.enabled?"ON":"OFF");
-        overlay_cursor(0,4);overlay_printf("%s %s",blur_supported?"H BLUR      ":"H BLUR REQ  ",strength(settings.blur));
-        overlay_cursor(0,5);if(scan_supported)overlay_printf("SCANLINE     %s",strength(settings.scanline));
-        else if(blur_supported)overlay_printf("SCANLINE     NOT YET");
-        else overlay_printf("SCANLINE REQ %s",strength(settings.scanline));
-        overlay_cursor(0,6);overlay_printf("STORE: %s",preview_only?"UNAVAILABLE":ui16_crt_read_name(restored.state));
-        overlay_cursor(0,7);overlay_printf("APPLY: %s",matched?"FRAME ACK":"WAITING");
-        overlay_cursor(0,8);if(identity.valid)overlay_printf("ROM ID: %08lx",static_cast<unsigned long>(identity.crc));
-        else overlay_printf("ROM ID: UNAVAILABLE");
-        overlay_cursor(0,9);overlay_printf("%s",storage_actions_disabled()?"SAVE: NOT AVAILABLE":"SAVE (X/Y: CANCEL)");
-        overlay_cursor(0,10);overlay_printf("%s",reset_available()?"RESET TO RECOMMENDED":"RESET: NOT AVAILABLE");
-        overlay_cursor(0,11);overlay_printf("DEFAULTS: %s",ui16_crt_defaults_state_name(defaults_snapshot.state));
+    bool info=false;
+    int osd_width()const override{return info?21:13;}
+    const Ui16OsdStyle *osd_style()const override{
+        static const Ui16OsdStyle normal{13,"CRT X/Y:BACK","START:INFO",true};
+        static const Ui16OsdStyle details{13,"CRT X/Y:BACK","START:HIDE",true};
+        return info?&details:&normal;
     }
-    std::vector<int> get_options()override{if(storage_actions_disabled()){if(blur_supported&&!scan_supported)return {3,4};return {3,4,5};}if(blur_supported&&!scan_supported)return {3,4,9,10};return {3,4,5,9,10};}
+    bool on_info(std::uint16_t buttons)override{
+        if(buttons==0x0008){info=!info;redraw=true;}
+        return true; // Consume START combinations without editing or saving.
+    }
+    void render()override {
+        overlay_clear();overlay_cursor(0,0);overlay_printf("%s %s",blur_supported?"CRT  ":"CRT REQ",settings.enabled?"ON":"OFF");
+        overlay_cursor(0,1);overlay_printf("BLUR %s",strength(settings.blur));
+        overlay_cursor(0,2);overlay_printf("SCAN %s",blur_supported&&!scan_supported?"N/A":strength(settings.scanline));
+        overlay_cursor(0,3);overlay_printf("%s",storage_actions_disabled()?"SAVE N/A":save_failed?"SAVE FAILED":dirty()?"SAVE *":(saved_user||persisted_reset)?"SAVE OK":"SAVE");
+        overlay_cursor(0,4);overlay_printf("%s",reset_available()?"RESET":"RESET N/A");
+        if(!info)return;
+        overlay_cursor(0,5);overlay_printf("SAVE: %s",read_only?"READ ONLY":preview_only?"UNAVAILABLE":save_failed?"FAILED":dirty()?"UNSAVED":(saved_user||persisted_reset)?"SAVED":"RECOMMENDED");
+        overlay_cursor(0,6);overlay_printf("INITIAL: %s",restored.override_value.present?"USER":recommended_source);
+        overlay_cursor(0,7);overlay_printf("STORE: %s",preview_only?"UNAVAILABLE":ui16_crt_read_name(restored.state));
+        overlay_cursor(0,8);overlay_printf("APPLY: %s",matched?"FRAME ACK":"WAITING");
+        overlay_cursor(0,9);if(identity.valid)overlay_printf("ROM ID: %08lx",static_cast<unsigned long>(identity.crc));
+        else overlay_printf("ROM ID: UNAVAILABLE");
+        overlay_cursor(0,10);overlay_printf("DEFAULTS: %s",ui16_crt_defaults_state_name(defaults_snapshot.state));
+        overlay_cursor(0,11);overlay_printf("RESET = RECOMMENDED");
+    }
+    std::vector<int> get_options()override{if(storage_actions_disabled()){if(blur_supported&&!scan_supported)return {0,1};return {0,1,2};}if(blur_supported&&!scan_supported)return {0,1,3,4};return {0,1,2,3,4};}
     bool on_adjust(int row,int delta)override {
         if(row==0)settings.enabled=!settings.enabled;
         else if(row==1)settings.blur=(settings.blur+(delta>0?1:3))%4;
@@ -100,7 +109,7 @@ struct CrtMenu:Menu {
 };
 }
 void ui16_crt_new_session(const Ui16CrtRecommendation &recommended,const Ui16RomIdentity &rom_id,const Ui16CrtRestore &restore,Ui16CrtSaveFn save,const Ui16CrtDefaults &defaults){
-    preview_only=false;read_only=false;snes_session=false;
+    preview_only=false;read_only=false;
     identity=rom_id;save_callback=save;save_failed=false;
     restored=restore;
     if(!identity.valid||!restore.override_value.present||restore.override_value.settings.blur>3||restore.override_value.settings.scanline>3||
@@ -144,7 +153,6 @@ void ui16_crt_snes_session(const Ui16CrtRecommendation &recommended,const Ui16Ro
         ui16_crt_readonly_session(recommended,rom_id,restore,defaults);return;
     }
     ui16_crt_new_session(recommended,rom_id,restore,save,defaults);
-    snes_session=true;
 }
 Menu *ui16_create_crt_menu(bool horizontal_blur,bool scanline){return new CrtMenu(horizontal_blur,scanline);}
 #endif

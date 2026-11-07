@@ -36,7 +36,7 @@ void ui16_osd_menu_input_loop(bool fixed_center,const char *title,bool dual_osd)
                 nav=Ui16Navigation(options.size()+(fixed_center?0:1),selected);
             }
             overlay_osd_capture_begin();menu->render();overlay_osd_capture_end();
-            const auto frame=ui16_osd_layout(ui16_osd_canvas(),options,nav.selected(),top,width_floor,fixed_center?Ui16OsdPosition::Center:position,!fixed_center,title);
+            const auto frame=ui16_osd_layout(ui16_osd_canvas(),options,nav.selected(),top,width_floor,fixed_center?Ui16OsdPosition::Center:position,!fixed_center,title,menu->osd_style());
             const bool same_geometry=displayed_valid && frame.x==displayed.x && frame.y==displayed.y &&
                 frame.width==displayed.width && frame.height==displayed.height;
             // Keep the current window visible. Send only changed character runs
@@ -75,6 +75,13 @@ void ui16_osd_menu_input_loop(bool fixed_center,const char *title,bool dual_osd)
         if(!conflict&&(pressed&UI16_BUTTON_BACK)){
             if(menu->on_close()){overlay(0);return;}
             dirty=true;delay(10);continue;
+        }
+        // START only changes the information view. A held button must not
+        // toggle repeatedly or perform an edit/SAVE on the same input edge.
+        if((pressed&0x0008)&&menu->on_info(buttons)){
+            if(buttons!=0x0008)chord_release=true;
+            top=0;width_floor=menu->osd_width();dirty=true;
+            delay(10);continue;
         }
         const auto now=static_cast<std::uint32_t>(bflb_mtimer_get_time_ms());
         if(nav.update(buttons,now))dirty=true;
