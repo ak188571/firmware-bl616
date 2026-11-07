@@ -467,6 +467,35 @@ int main(){
             ui16_osd_menu_input_loop(false,"CRT SETTINGS",true);
             assert(boxes.size()==1&&saves==saves_before_mix&&config_sends==sends_before_mix+1&&config==baseline);menu_clear();
         }
+        // Also cover a second button pressed AFTER START, while START is still
+        // held. The entire info-toggle gesture must wait for all buttons up.
+        for(unsigned later:{0x100u,0x80u}){
+            now=30000;ui16_crt_new_session({},id,saved,save_test);
+            auto guarded=std::unique_ptr<Menu>(ui16_create_crt_menu(true,true));
+            assert(guarded->on_adjust(1,1));ui16_crt_accept_status(config);guarded->on_tick(static_cast<std::uint32_t>(now));
+            const auto saves_before_later=saves;const auto sends_before_later=config_sends;
+            menu_clear();push_menu(std::move(guarded));_overlay_on=1;at=0;boxes.clear();snapshots.clear();
+            pads=later==0x100u?std::vector<std::uint16_t>{0x20,0,0x20,0,0x20,0}:std::vector<std::uint16_t>{};
+            pads.insert(pads.end(),{8,static_cast<std::uint16_t>(8|later),static_cast<std::uint16_t>(8|later),8,0,0x200});
+            ui16_osd_menu_input_loop(false,"CRT SETTINGS",true);
+            assert(saves==saves_before_later&&config_sends==sends_before_later+1&&config==baseline);
+            assert(boxes.size()==2&&boxes[0][2]==16&&boxes[1][2]==24);menu_clear();
+        }
+        // Once START is fully released, intentional SAVE works. A subsequent
+        // unchanged SAVE remains a no-op for both USER and Reset baselines.
+        for(bool reset_mode:{false,true}){
+            now=40000;const auto restored_mode=reset_mode?Ui16CrtRestore{Ui16CrtReadState::Reset,{},1,7}:saved;
+            ui16_crt_new_session({},id,restored_mode,save_test);
+            auto intentional=std::unique_ptr<Menu>(ui16_create_crt_menu(true,true));
+            if(!reset_mode)assert(intentional->on_adjust(1,1));
+            const auto expected_saved=config;ui16_crt_accept_status(config);intentional->on_tick(static_cast<std::uint32_t>(now));
+            const auto before_intentional=saves;
+            menu_clear();push_menu(std::move(intentional));_overlay_on=1;at=0;boxes.clear();snapshots.clear();
+            pads={0x20,0,0x20,0,0x20,0,8,8,0,0x100,0x100,0,8,0,0x100,0,0x200};
+            ui16_osd_menu_input_loop(false,"CRT SETTINGS",true);
+            assert(saves==before_intentional+(reset_mode?0:1)&&config==expected_saved);
+            assert(!boxes.empty()&&boxes.back()[2]==16&&boxes.back()[3]==10);menu_clear();
+        }
     }
     std::puts("CRT host PASS: hotkeys, preserved config, frame ACK/retry, stale ACK rejection, CSV/default/explicit OFF seeds, invalid seed fallback, explicit SAVE/stay-open/retry and X/Y discard of live preview");
     std::puts("Compact OSD2 PASS: NES/SNES all 32 settings and 5 positions, hidden diagnostics, SAVE status, START hold/combinations, preserved selection, visible window and exact shrink-back");

@@ -76,10 +76,10 @@ void ui16_osd_menu_input_loop(bool fixed_center,const char *title,bool dual_osd)
             if(menu->on_close()){overlay(0);return;}
             dirty=true;delay(10);continue;
         }
-        // START only changes the information view. A held button must not
-        // toggle repeatedly or perform an edit/SAVE on the same input edge.
+        // START owns input until every button is up. This also blocks an
+        // edit/SAVE button pressed later while START remains held.
         if((pressed&0x0008)&&menu->on_info(buttons)){
-            if(buttons!=0x0008)chord_release=true;
+            chord_release=true; // Also block buttons added after START, until all are up.
             top=0;width_floor=menu->osd_width();dirty=true;
             delay(10);continue;
         }
