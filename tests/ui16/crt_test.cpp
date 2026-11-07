@@ -137,7 +137,7 @@ int main(){
     std::unique_ptr<Menu> preset_menu(ui16_create_crt_menu(true,true));
     assert(!preset_menu->on_tick(3001)); // A previous game's ACK must be cleared.
     capture_info(*preset_menu);
-    assert(std::string(ui16_osd_canvas().cells.data()+6*32,32).find("INITIAL: CSV")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+6*32,32).find("LOADED FROM: CSV")!=std::string::npos);
     assert(std::string(ui16_osd_canvas().cells.data()+8*32,32).find("WAITING")!=std::string::npos);
     ui16_crt_accept_status(config);assert(preset_menu->on_tick(3010));
     assert(preset_menu->on_adjust(1,1));const auto edited=config;
@@ -146,13 +146,13 @@ int main(){
     assert(config==edited); // The initial preset is not reapplied on menu creation.
     ui16_crt_new_session();assert(config==preserved); // A different game with no CSV is OFF.
     capture_info(*preset_menu);
-    assert(std::string(ui16_osd_canvas().cells.data()+6*32,32).find("INITIAL: DEFAULT")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+6*32,32).find("LOADED FROM: BUILT-IN")!=std::string::npos);
     ui16_crt_new_session({false,{true,3,3}});assert(config==preserved);
     ui16_crt_new_session({true,{true,4,2}});assert(config==preserved);
     ui16_crt_new_session({true,{true,1,4}});assert(config==preserved);
     ui16_crt_new_session({true,{false,0,0}});assert(config==preserved);
     capture_info(*preset_menu);
-    assert(std::string(ui16_osd_canvas().cells.data()+6*32,32).find("INITIAL: CSV")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+6*32,32).find("LOADED FROM: CSV")!=std::string::npos);
     ui16_crt_new_session(recommended);assert(config==recommended.settings.merge(preserved));
     const Ui16RomIdentity rom_id{true,Ui16RomVolume::Sd,1,0xabcdef01,65552};
     ui16_crt_new_session(recommended,rom_id);
@@ -167,8 +167,8 @@ int main(){
     const Ui16CrtRestore saved{Ui16CrtReadState::User,{true,{true,3,3}}};
     ui16_crt_new_session(recommended,rom_id,saved);assert(config==saved.override_value.settings.merge(preserved));
     capture_info(*preset_menu);
-    assert(std::string(ui16_osd_canvas().cells.data()+6*32,32).find("INITIAL: USER")!=std::string::npos);
-    assert(std::string(ui16_osd_canvas().cells.data()+7*32,32).find("STORE: USER")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+6*32,32).find("LOADED FROM: USER")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+7*32,32).find("SAVE READ: USER")!=std::string::npos);
     assert(preset_menu->on_adjust(1,1));const auto restored_edit=config;
     assert(!preset_menu->on_choose(3));preset_menu.reset(ui16_create_crt_menu(true,true));assert(config==restored_edit);
     ui16_crt_new_session(recommended,rom_id,{Ui16CrtReadState::Reset,{}});assert(config==recommended.settings.merge(preserved));
@@ -250,7 +250,7 @@ int main(){
     const Ui16CrtDefaults global_defaults{Ui16CrtDefaultsState::Ready,Ui16CrtDefaultsSource::Global,{true,{true,1,3}}};
     ui16_crt_new_session({},rom_id,{},save_test,system_defaults);assert(config==system_defaults.recommendation.settings.merge(preserved));
     capture_info(*preset_menu);
-    assert(std::string(ui16_osd_canvas().cells.data()+6*32,32).find("INITIAL: SYSTEM")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+6*32,32).find("LOADED FROM: SYSTEM")!=std::string::npos);
     assert(std::string(ui16_osd_canvas().cells.data()+10*32,32).find("DEFAULTS: OK")!=std::string::npos);
     ui16_crt_new_session({},rom_id,{Ui16CrtReadState::Reset,{},0,3},save_test,global_defaults);
     assert(config==global_defaults.recommendation.settings.merge(preserved));
@@ -349,7 +349,7 @@ int main(){
         assert(config==expected.merge(preserved));const auto before_reloaded=saves;
         assert(!snes_menu->on_choose(3)&&saves==before_reloaded);
         capture_info(*snes_menu);
-        assert(std::string(ui16_osd_canvas().cells.data()+6*32,32).find(source==0?"CSV":source==1?"SYSTEM":source==2?"GLOBAL":"DEFAULT")!=std::string::npos);
+        assert(std::string(ui16_osd_canvas().cells.data()+6*32,32).find(source==0?"CSV":source==1?"SYSTEM":source==2?"GLOBAL":"BUILT-IN")!=std::string::npos);
         assert(std::string(ui16_osd_canvas().cells.data()+7*32,32).find("RESET")!=std::string::npos);
     }
     // A failed Reset SAVE cancels through the real X/Y paths to the prior USER.
@@ -385,7 +385,7 @@ int main(){
     assert(config==preview_value&&saves==saves_before_preview);
     capture_info(*preview);
     for(int row:{5,7,9,10})assert(std::string(ui16_osd_canvas().cells.data()+row*32,32).find("UNAVAILABLE")!=std::string::npos);
-    assert(std::string(ui16_osd_canvas().cells.data()+6*32,32).find("DEFAULT")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+6*32,32).find("BUILT-IN")!=std::string::npos);
     assert(preview->on_close()&&config==preserved);
     // Reopening stays volatile; returning to NES restores its existing policy.
     preview.reset(ui16_create_crt_menu());assert((preview->get_options()==std::vector<int>{0,1,2}));
@@ -419,12 +419,12 @@ int main(){
             const auto text=visible(small.cells,small.x,small.y,small.width,small.height);
             assert(text.find("CRT X/Y:BACK")!=std::string::npos&&text.find("START:INFO")!=std::string::npos);
             assert(text.find("SAVE OK")!=std::string::npos&&text.find("RESET")!=std::string::npos);
-            for(const char *hidden:{"ROM ID","INITIAL","STORE:","APPLY:","DEFAULTS:","STAGE"})assert(text.find(hidden)==std::string::npos);
+            for(const char *hidden:{"ROM ID","LOADED FROM","SAVE READ:","APPLY:","DEFAULTS:","STAGE"})assert(text.find(hidden)==std::string::npos);
             if(value.blur==2||value.scanline==2)assert(text.find("STD")!=std::string::npos&&text.find("STANDARD")==std::string::npos);
             assert(compact->on_info());const auto expanded=frame(*compact,static_cast<Ui16OsdPosition>(pos));
             assert(expanded.width==24&&expanded.height==17);
             const auto info=visible(expanded.cells,expanded.x,expanded.y,expanded.width,expanded.height);
-            for(const char *shown:{"ROM ID: abcdef01","INITIAL: USER","STORE: USER","APPLY: FRAME ACK","DEFAULTS: MISSING","RESET = RECOMMENDED","START:HIDE"})assert(info.find(shown)!=std::string::npos);
+            for(const char *shown:{"ROM ID: abcdef01","LOADED FROM: USER","SAVE READ: USER","APPLY: FRAME ACK","DEFAULTS: MISSING","RESET = RECOMMENDED","START:HIDE"})assert(info.find(shown)!=std::string::npos);
             assert(compact->on_info());const auto shrunk=frame(*compact,static_cast<Ui16OsdPosition>(pos));
             assert(shrunk.width==small.width&&shrunk.height==small.height&&config==no_edit&&saves==no_save);
         }
@@ -497,6 +497,40 @@ int main(){
             assert(!boxes.empty()&&boxes.back()[2]==16&&boxes.back()[3]==10);menu_clear();
         }
     }
+    // LOAD fields are snapshots, not the live SAVE status or its destination.
+    for(unsigned system:{1u,2u}){
+        Ui16RomIdentity id{true,Ui16RomVolume::Sd,system,0x232bb5b8,2097152};
+        ui16_crt_new_session({},id,{Ui16CrtReadState::Reset,{},0,7},save_test,system_defaults);
+        std::unique_ptr<Menu> load_menu(ui16_create_crt_menu(true,true));
+        capture_info(*load_menu);
+        const auto source_line=std::string(ui16_osd_canvas().cells.data()+6*32,32);
+        const auto read_line=std::string(ui16_osd_canvas().cells.data()+7*32,32);
+        assert(source_line.find("LOADED FROM: SYSTEM")!=std::string::npos);
+        assert(read_line.find("SAVE READ: RESET")!=std::string::npos);
+        assert(load_menu->on_adjust(0,1));save_ok=true;
+        assert(!load_menu->on_choose(3));capture_info(*load_menu);
+        assert(std::string(ui16_osd_canvas().cells.data()+5*32,32).find("SAVE: SAVED")!=std::string::npos);
+        assert(std::string(ui16_osd_canvas().cells.data()+6*32,32)==source_line);
+        assert(std::string(ui16_osd_canvas().cells.data()+7*32,32)==read_line);
+        assert(!load_menu->on_choose(4)&&!load_menu->on_choose(3));capture_info(*load_menu);
+        assert(std::string(ui16_osd_canvas().cells.data()+6*32,32)==source_line);
+        assert(std::string(ui16_osd_canvas().cells.data()+7*32,32)==read_line);
+        for(auto state:{Ui16CrtReadState::NoId,Ui16CrtReadState::Missing,Ui16CrtReadState::User,
+                        Ui16CrtReadState::Reset,Ui16CrtReadState::Recovered,Ui16CrtReadState::Bad,
+                        Ui16CrtReadState::Io,Ui16CrtReadState::Future,Ui16CrtReadState::Conflict}){
+            ui16_crt_new_session({},id,{state,{}},save_test,{});
+            capture_info(*load_menu);
+            const auto &canvas=ui16_osd_canvas().cells;
+            assert(std::string(canvas.data()+6*32,32).find("LOADED FROM: BUILT-IN")!=std::string::npos);
+            assert(std::string(canvas.data()+7*32,32).find(std::string("SAVE READ: ")+ui16_crt_read_name(state))!=std::string::npos);
+            assert(std::string(canvas.data()+6*32+21,11)==std::string(11,' '));
+            assert(std::string(canvas.data()+7*32+21,11)==std::string(11,' '));
+            const auto f=frame(*load_menu);assert(f.width==16&&f.height==10);
+            assert(load_menu->on_info());const auto info_frame=frame(*load_menu);
+            assert(info_frame.width==24&&info_frame.height==17);assert(load_menu->on_info());
+        }
+    }
+    std::puts("Load info PASS: source/read-state snapshots survive USER/Reset SAVE, all states fit existing frame, NES/SNES");
     std::puts("CRT host PASS: hotkeys, preserved config, frame ACK/retry, stale ACK rejection, CSV/default/explicit OFF seeds, invalid seed fallback, explicit SAVE/stay-open/retry and X/Y discard of live preview");
     std::puts("Compact OSD2 PASS: NES/SNES all 32 settings and 5 positions, hidden diagnostics, SAVE status, START hold/combinations, preserved selection, visible window and exact shrink-back");
 }

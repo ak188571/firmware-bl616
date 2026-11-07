@@ -6,7 +6,7 @@
 
 namespace {
 Ui16CrtSettings settings;
-const char *recommended_source="DEFAULT";
+const char *recommended_source="BUILT-IN";
 Ui16CrtDefaults defaults_snapshot;
 Ui16RomIdentity identity;
 Ui16CrtRestore restored;
@@ -55,8 +55,9 @@ struct CrtMenu:Menu {
         overlay_cursor(0,4);overlay_printf("%s",reset_available()?"RESET":"RESET N/A");
         if(!info)return;
         overlay_cursor(0,5);overlay_printf("SAVE: %s",read_only?"READ ONLY":preview_only?"UNAVAILABLE":save_failed?"FAILED":dirty()?"UNSAVED":(saved_user||persisted_reset)?"SAVED":"RECOMMENDED");
-        overlay_cursor(0,6);overlay_printf("INITIAL: %s",restored.override_value.present?"USER":recommended_source);
-        overlay_cursor(0,7);overlay_printf("STORE: %s",preview_only?"UNAVAILABLE":ui16_crt_read_name(restored.state));
+        // These describe the ROM-load snapshot; SAVE above is the live state.
+        overlay_cursor(0,6);overlay_printf("LOADED FROM: %s",restored.override_value.present?"USER":recommended_source);
+        overlay_cursor(0,7);overlay_printf("SAVE READ: %s",preview_only?"UNAVAILABLE":ui16_crt_read_name(restored.state));
         overlay_cursor(0,8);overlay_printf("APPLY: %s",matched?"FRAME ACK":"WAITING");
         overlay_cursor(0,9);if(identity.valid)overlay_printf("ROM ID: %08lx",static_cast<unsigned long>(identity.crc));
         else overlay_printf("ROM ID: UNAVAILABLE");
@@ -115,7 +116,7 @@ void ui16_crt_new_session(const Ui16CrtRecommendation &recommended,const Ui16Rom
     if(!identity.valid||!restore.override_value.present||restore.override_value.settings.blur>3||restore.override_value.settings.scanline>3||
        (restore.state!=Ui16CrtReadState::User&&restore.state!=Ui16CrtReadState::Recovered))restored.override_value={};
     defaults_snapshot=defaults;
-    recommended_source="DEFAULT";session_recommended={};
+    recommended_source="BUILT-IN";session_recommended={};
     if(defaults.state==Ui16CrtDefaultsState::Ready&&defaults.recommendation.present&&
        defaults.recommendation.settings.blur<=3&&defaults.recommendation.settings.scanline<=3&&
        (defaults.source==Ui16CrtDefaultsSource::System||defaults.source==Ui16CrtDefaultsSource::Global)){
