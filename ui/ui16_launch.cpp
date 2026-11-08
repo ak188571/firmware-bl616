@@ -1,6 +1,7 @@
 #ifdef UI16_SYSTEM_MENU
 #include "ui16_launch.h"
 #include "ui16_game_list.h"
+#include "tc_launch_trace.h"
 
 namespace {
 bool valid_path(const std::string &path,bool empty_ok)
@@ -38,6 +39,7 @@ const char *ui16_launch_error_text(Ui16LaunchError error)
 }
 Ui16LaunchError Ui16Runtime::launch(const char *drive,const Ui16LaunchTarget &target,const Ui16LaunchRequest &request)
 {
+    TcLaunchScope trace;
     if(!monitor_ready_||!drive||(std::string(drive)!="sd:"&&std::string(drive)!="usb:")||
        target.core_id!=request.core_id||target.core_id<=0||!valid_path(target.rom_dir,false)||
        !valid_path(request.relative_path,true)||!ui16_valid_component(request.filename)||
@@ -51,13 +53,21 @@ Ui16LaunchError Ui16Runtime::launch(const char *drive,const Ui16LaunchTarget &ta
     if(!ops_.find_core(target.core_file.c_str(),core,ops_.context))return Ui16LaunchError::MissingCore;
     // Verify the return route before replacing the monitor FPGA image.
     if(!ops_.find_core("monitor.bin",monitor,ops_.context))return Ui16LaunchError::MissingMonitor;
-    if(ops_.starting&&!ops_.starting(ops_.context))return Ui16LaunchError::StartingDisplayFailed;
+    tc_launch_mark(TcLaunchEvent::PreflightDone);
+    if(ops_.starting&&!ops_.starting(request.core_id,ops_.context))return Ui16LaunchError::StartingDisplayFailed;
+    tc_launch_mark(TcLaunchEvent::NoticeDone);
     monitor_ready_=false;
     ops_.display_owner(false,ops_.context);
+    tc_launch_mark(TcLaunchEvent::ProgramBegin);
     if(!ops_.program(core.c_str(),ops_.context))return Ui16LaunchError::ProgramFailed;
+    tc_launch_mark(TcLaunchEvent::ProgramEnd);
     if(!ops_.wait_core(target.core_id,ops_.context))return Ui16LaunchError::CoreTimeout;
+    tc_launch_mark(TcLaunchEvent::CoreReady);
     if(ops_.osd_ready&&!ops_.osd_ready(ops_.context))return Ui16LaunchError::OsdUnsupported;
+    tc_launch_mark(TcLaunchEvent::OsdReady);
     if(!ops_.load_rom(target.core_id,path.c_str(),ops_.context))return Ui16LaunchError::RomFailed;
+    tc_launch_mark(TcLaunchEvent::LoadReturned);
+    tc_launch_success();
     return Ui16LaunchError::None;
 }
 Ui16LaunchError Ui16Runtime::restore_monitor()

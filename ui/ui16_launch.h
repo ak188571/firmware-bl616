@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include "ui16_crt_settings.h"
+#include "tc_launch_trace.h"
 
 struct Ui16LaunchRequest {
     int core_id=0;
@@ -31,7 +32,7 @@ struct Ui16LaunchOps {
     void (*display_owner)(bool ui16,void *)=nullptr;
     bool (*osd_ready)(void *)=nullptr;
     // Finish the monitor's launch notice before handing the FPGA to the game.
-    bool (*starting)(void *)=nullptr;
+    bool (*starting)(int,void *)=nullptr;
 };
 
 class Ui16Runtime {

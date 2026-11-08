@@ -31,7 +31,7 @@ struct Fake {
     static bool romload(int id,const char *p,void *v){auto &f=get(v);f.calls.push_back("load:"+std::to_string(id)+":"+p);return f.load;}
     static void display(bool owner,void *v){auto &f=get(v);f.calls.push_back(owner?"ui16":"legacy");f.owner=owner;}
     static bool caps(void *v){return get(v).capable;}
-    static bool starting(void *v){auto &f=get(v);assert(f.owner);f.calls.push_back("starting");return f.notice;}
+    static bool starting(int,void *v){auto &f=get(v);assert(f.owner);f.calls.push_back("starting");return f.notice;}
     Ui16LaunchOps ops(){return {this,file,find,prog,probe,romload,display,caps,starting};}
 };
 static Ui16GameList data;

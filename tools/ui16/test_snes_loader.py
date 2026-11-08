@@ -6,8 +6,10 @@ build=root/'build-ui16-host';build.mkdir(exist_ok=True)
 source=(root/'core/snes.cpp').read_text(encoding='utf-8')
 source=source.replace('#include "utils.h"','#include "snes_loader_platform.h"').replace('#include "cores.h"','')
 path=build/'snes_loader_under_test.cpp';path.write_text(source,encoding='utf-8')
-exe=build/'snes_loader_test.exe'
-subprocess.run([os.environ.get('CXX','g++'),'-BC:/msys64/ucrt64/bin/','-std=c++17','-Wall','-Wextra','-Werror',
-    '-Wno-unused-parameter','-Wno-sign-compare','-I'+str(root/'tests/ui16'),'-I'+str(root/'ui'),
+for enabled in (False,True):
+    exe=build/('snes_loader_uart8_test.exe' if enabled else 'snes_loader_test.exe')
+    subprocess.run([os.environ.get('CXX','g++'),'-BC:/msys64/ucrt64/bin/','-std=c++17','-Wall','-Wextra','-Werror',
+    '-Wno-unused-parameter','-Wno-sign-compare','-I'+str(root/'tests/ui16'),'-I'+str(root/'ui'),'-I'+str(root/'utils'),
+    *(['-DTC_ROM_UART'] if enabled else []),
     str(path),str(root/'tests/ui16/snes_loader_test.cpp'),'-o',str(exe)],check=True)
-subprocess.run([str(exe)],check=True)
+    subprocess.run([str(exe)],check=True)

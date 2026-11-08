@@ -3,7 +3,7 @@
 #include <stddef.h>
 typedef int FRESULT;
 enum { FR_OK = 0, FR_DISK_ERR = 1, FR_NO_FILE = 4, FR_NO_PATH = 5, FR_EXIST = 8 };
-enum { FA_READ = 1, FA_WRITE = 2, FA_CREATE_ALWAYS = 8 };
+enum { FA_READ = 1, FA_WRITE = 2, FA_CREATE_NEW = 4, FA_CREATE_ALWAYS = 8 };
 typedef unsigned int UINT;
 typedef struct { size_t position; size_t size; } FIL;
 typedef size_t FSIZE_t;

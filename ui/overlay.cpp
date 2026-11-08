@@ -93,6 +93,18 @@ void overlay_clear() {
     }
 }
 
+void overlay_clear_logo() {
+    // The legacy monitor stores its logo bitmap at $380..$3ff, immediately
+    // after the 28 text rows. Clear those four RAM rows before revealing it.
+    for (int row = 28; row < 32; ++row) {
+        overlay_cursor(0, row);
+        taskENTER_CRITICAL();
+        fpga_tx_header(0x05, 33);
+        for (int column = 0; column < 32; ++column) fpga_tx_byte(0);
+        taskEXIT_CRITICAL();
+    }
+}
+
 void overlay_status(const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);

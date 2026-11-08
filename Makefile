@@ -15,6 +15,8 @@ UI16_SYSTEM_MENU ?= OFF
 cmake_definition+=-DUI16_SYSTEM_MENU=$(UI16_SYSTEM_MENU)
 UI16_SD_FONT ?= OFF
 cmake_definition+=-DUI16_SD_FONT=$(UI16_SD_FONT)
+TC_ROM_UART ?= OFF
+cmake_definition+=-DTC_ROM_UART=$(TC_ROM_UART)
 
 include $(BL_SDK_BASE)/project.build
 

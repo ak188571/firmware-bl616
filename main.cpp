@@ -33,6 +33,12 @@ extern "C" {
 #include "overlay.h"
 #include "init.h"
 #include "menu_manager.h"
+#include "tc_launch_trace.h"
+#include "tc_launch_export.h"
+#include "tc_rom_uart.h"
+#ifdef TC_LAUNCH_TRACE
+std::uint64_t tc_launch_now_us(){return bflb_mtimer_get_time_us();}
+#endif
 
 #ifdef UI16_SYSTEM_MENU
 #include "ui16_system_menu.h"
@@ -363,17 +369,26 @@ static void uart1_rx_isr(int,void *)
     }
 }
 // 1: byte, 0: empty, -1: overflow (discard incomplete data and resynchronise).
-static int uart1_rx_take(uint8_t *byte)
+static int uart1_rx_take(uint8_t *byte,bool transfer=false)
 {
     int result=0;
     taskENTER_CRITICAL();
-    if(uart1_rx_overflow){uart1_rx_read=uart1_rx_write;uart1_rx_overflow=false;result=-1;}
+    // Check ownership and advance the consumer together. A task switch between
+    // the legacy loop's guard and this function must not steal a transfer ACK.
+    if(!transfer&&tc_rom_uart_owned())result=0;
+    else if(uart1_rx_overflow){uart1_rx_read=uart1_rx_write;uart1_rx_overflow=false;result=-1;}
     else if(uart1_rx_read!=uart1_rx_write){
         *byte=uart1_rx_ring[uart1_rx_read];uart1_rx_read=(uart1_rx_read+1)&1023;result=1;
     }
     taskEXIT_CRITICAL();
     return result;
 }
+#ifdef TC_ROM_UART
+int tc_rom_uart_rx_take(std::uint8_t *byte){return uart1_rx_take(byte,true);}
+void tc_rom_uart_rx_flush(){
+    taskENTER_CRITICAL();uart1_rx_read=uart1_rx_write;uart1_rx_overflow=false;taskEXIT_CRITICAL();
+}
+#endif
 static void uart1_rx_start()
 {
     bflb_irq_attach(uart1_dev->irq_num,uart1_rx_isr,nullptr);
@@ -396,12 +411,15 @@ static void uart1_rx_task(void *pvParameters)
 #ifdef UI16_SYSTEM_MENU
     char osd_tag[7]={};
     unsigned osd_tag_count=0;
-    bool osd_tag_found=false,crt_tag_found=false,blur_tag_found=false,scan_tag_found=false,restart_tag_found=false;
+    bool osd_tag_found=false,crt_tag_found=false,blur_tag_found=false,scan_tag_found=false,restart_tag_found=false,rom_tag_found=false,uart8_tag_found=false;
 #endif
     while (1) {
         uint8_t ch=0;
         int received;
-        while ((received=uart1_rx_take(&ch))!=0) {
+#ifdef TC_ROM_UART
+        if(tc_rom_uart_owned()){pos=0;discard_payload=0;vTaskDelay(pdMS_TO_TICKS(1));continue;}
+#endif
+        while (!tc_rom_uart_owned()&&(received=uart1_rx_take(&ch))!=0) {
             if(received<0){pos=0;discard_payload=0;continue;}
             if(discard_payload){--discard_payload;continue;}
 
@@ -444,7 +462,7 @@ static void uart1_rx_task(void *pvParameters)
                 pos = 0;
             } else if (type == 2) {                 // config string / OSD feature marker
 #ifdef UI16_SYSTEM_MENU
-                if(pos==4){osd_tag_count=0;osd_tag_found=false;crt_tag_found=false;blur_tag_found=false;scan_tag_found=false;restart_tag_found=false;}
+                if(pos==4){osd_tag_count=0;osd_tag_found=false;crt_tag_found=false;blur_tag_found=false;scan_tag_found=false;restart_tag_found=false;rom_tag_found=false;uart8_tag_found=false;}
                 for(unsigned i=0;i<6;++i)osd_tag[i]=osd_tag[i+1];
                 osd_tag[6]=static_cast<char>(ch);
                 if(++osd_tag_count>=7&&memcmp(osd_tag,"OSDWIN1",7)==0)osd_tag_found=true;
@@ -452,7 +470,10 @@ static void uart1_rx_task(void *pvParameters)
                 if(osd_tag_count>=7&&memcmp(osd_tag,"CRTBLR1",7)==0)blur_tag_found=true;
                 if(osd_tag_count>=7&&memcmp(osd_tag,"CRTSCN1",7)==0)scan_tag_found=true;
                 if(osd_tag_count>=7&&memcmp(osd_tag,"RSTROM1",7)==0)restart_tag_found=true;
+                if(osd_tag_count>=7&&memcmp(osd_tag,"ROMXFR1",7)==0)rom_tag_found=true;
+                if(osd_tag_count>=7&&memcmp(osd_tag,"UART8M1",7)==0)uart8_tag_found=true;
                 if(pos==len+2){
+                    tc_rom_uart_capabilities(rom_tag_found,uart8_tag_found);
                     taskENTER_CRITICAL();restart_capable=osd_tag_found&&restart_tag_found;crt_blur_capable=osd_tag_found&&crt_tag_found&&blur_tag_found;crt_scanline_capable=crt_blur_capable&&scan_tag_found;osd_config_capable=osd_tag_found;crt_stage1_capable=osd_tag_found&&crt_tag_found;osd_config_ready=true;taskEXIT_CRITICAL();
                 }
 #endif
@@ -538,6 +559,7 @@ static void uart1_rx_task(void *pvParameters)
 #ifdef UI16_SYSTEM_MENU
 static bool ui16_hw_osd_ready(void *)
 {
+    tc_rom_uart_capabilities(false,false);
     taskENTER_CRITICAL();osd_config_ready=false;osd_config_capable=false;crt_stage1_capable=false;crt_blur_capable=false;crt_scanline_capable=false;restart_capable=false;taskEXIT_CRITICAL();
     fpga_tx_header(2,1);
     const auto start=bflb_mtimer_get_time_ms();
@@ -616,13 +638,16 @@ static bool ui16_hw_load_rom(int id,const char *path,void *)
         overlay_status("Reading ROM ID...");
         // The JTAG phase has finished. Reuse the noncacheable loader resources
         // sequentially; identify_rom closes the read-only file before load_rom.
+        tc_launch_mark(TcLaunchEvent::IdentityBegin);
         crt_rom_identity=ui16_identify_rom(id,path,fcore,fbuf,BLOCK_SIZE,[](){delay(1);});
+        tc_launch_mark(TcLaunchEvent::IdentityEnd);
         if(tc_snes_sd_faulted()){crt_rom_identity={};return false;}
         crt_restore=ui16_read_crt_override(crt_rom_identity,fcore,fbuf,BLOCK_SIZE);
         if(tc_snes_sd_faulted()){crt_rom_identity={};crt_restore={};return false;}
         crt_defaults=ui16_read_crt_defaults(id,path,fcore,fbuf,BLOCK_SIZE);
         if(tc_snes_sd_faulted()){crt_rom_identity={};crt_restore={};crt_defaults={};return false;}
     }
+    tc_launch_mark(TcLaunchEvent::SettingsEnd);
     const int result=target->load_rom(path);
     if(result!=0||!core_running){core_running=false;crt_rom_identity={};crt_restore={};crt_defaults={};return false;}
     snes_crt_sd_session=crt_stage1_capable&&snes_sd;
@@ -632,10 +657,25 @@ static void ui16_hw_display_owner(bool ui16,void *)
 {
     fpga_use_ui16_display(ui16);overlay(1);
 }
-static bool ui16_hw_starting(void *)
+static bool ui16_hw_starting(int core_id,void *)
 {
-    ui16_send_starting_game();
-    if (bflb_uart_wait_tx_done(uart1_dev)!=0) return false;
+    if(core_id==2) {
+        // The monitor's legacy text writer and the game core share the same
+        // 32x28 screen layout. overlay_status starts at column 1, row 27.
+        overlay(0);
+        fpga_use_ui16_display(false);
+        overlay_clear();
+        overlay_clear_logo();
+        overlay_status("Preparing SNES core");
+        fpga_use_ui16_display(true);
+    } else {
+        ui16_send_starting_game();
+    }
+    const bool ready=bflb_uart_wait_tx_done(uart1_dev)==0;
+    // Reveal the finished row only after the legacy RAM has been cleared.
+    // Keep errors visible too, so the caller can redraw its UI16 error screen.
+    if(core_id==2) overlay(1);
+    if (!ready) return false;
     // Allow the completed frame to remain visible before FPGA reconfiguration.
     delay(500);
     return true;
@@ -821,6 +861,20 @@ static void main_task(void *pvParameters)
                     menu_clear();
                 }
                 ui16_restore_menu(runtime,browser);
+#ifdef TC_LAUNCH_TRACE
+                // The measured game has ended and the monitor is restored.
+                // Export only now; no log write runs during loading or gameplay.
+                if(request.core_id==2&&std::string(drv)=="sd:"){
+                    TcStorageLease lease;
+                    if(lease){
+                        const std::string measured=std::string(drv)+launch_target.rom_dir+
+                            (request.relative_path.empty()?"":"/"+request.relative_path)+"/"+request.filename;
+                        char log_path[32]{};
+                        const bool saved=tc_launch_export(measured.c_str(),request.core_id,fcore,fbuf,BLOCK_SIZE,log_path,sizeof(log_path));
+                        dprint("UART baseline: %s %s\n",saved?"saved":"FAILED",log_path);
+                    }
+                }
+#endif
 #ifdef UI16_SD_FONT
                 // FPGA reprogramming restores the initial embedded font ROM.
                 // Never trust a cached dynamic slot after returning from a game.

@@ -15,16 +15,24 @@ code=r'''
 #include <string>
 #include <cstdio>
 using UINT=unsigned;struct FIL{};FIL f_floppy[2];bool floppy[2]={};uint8_t fbuf[512];
+uint8_t floppy_packet[512];
+struct TcStorageLease{explicit operator bool()const{return true;}};
+bool pcxt_disk_owner(){return true;}
 constexpr int FR_OK=0;int f_lseek(FIL*,unsigned){return 0;}
-int f_write(FIL*,void*,unsigned,UINT*){return 0;}int f_read(FIL*,void*,unsigned,UINT*){return 1;}
+int f_write(FIL*,void*,unsigned n,UINT *written){*written=n;return 0;}int f_read(FIL*,void*,unsigned,UINT*){return 1;}
 void overlay_status(const char*){}void fpga_tx_header(int,int){}void fpga_tx_byte(uint8_t){}
 struct Device{int irq_num=22;} device;Device *uart1_dev=&device;
 static bool osd_config_ready=false,osd_config_capable=false;
+static bool crt_stage1_capable=false,crt_blur_capable=false,crt_scanline_capable=false,restart_capable=false;
+static bool rom_owned=false,rom_capable=false,switch_on_enter=false;
+bool tc_rom_uart_owned(){return rom_owned;}
+void tc_rom_uart_capabilities(bool protocol,bool uart8){rom_capable=protocol&&uart8;}
+void ui16_crt_accept_status(uint32_t){}
 static int depth=0;static unsigned core_id=0,joy1_state=0,joy2_state=0;void *state_mutex=nullptr;
 #define pdTRUE 1
 #define portMAX_DELAY 0
 int xSemaphoreTake(void*,int){return 1;}void xSemaphoreGive(void*){}
-#define taskENTER_CRITICAL() do{++depth;}while(0)
+#define taskENTER_CRITICAL() do{if(switch_on_enter){rom_owned=true;switch_on_enter=false;}++depth;}while(0)
 #define taskEXIT_CRITICAL() do{assert(--depth==0);}while(0)
 #define pdMS_TO_TICKS(x) (x)
 constexpr unsigned UART_INTSTS_RTO=16,UART_INTCLR_RTO=16;
@@ -56,17 +64,29 @@ int main(){
  assert(osd_config_ready&&osd_config_capable&&joy1_state==0x1234&&joy2_state==0x5678&&core_id==1);
  // Existing 515-byte floppy responses require a position counter wider than eight bits.
  std::vector<uint8_t> disk={0xaa,2,3,4,0,0};for(unsigned i=0;i<512;++i)disk.push_back(i);
- feed(disk);parse();for(unsigned i=0;i<512;++i)assert(fbuf[i]==uint8_t(i));
+ floppy[0]=true;feed(disk);parse();for(unsigned i=0;i<512;++i)assert(fbuf[i]==uint8_t(i));
  // Ring wrap, overflow reporting, and recovery with a fresh packet.
  for(int i=0;i<25;++i){feed(packet);parse();assert(osd_config_capable);}
  feed(std::vector<uint8_t>(1100,0x55));parse();assert(!uart1_rx_overflow);
  feed({0xaa,0,2,1,2});parse();assert(core_id==2);
  osd_config_ready=osd_config_capable=false;feed({0xaa,0,4,2,'O','L','D'});parse();assert(osd_config_ready&&!osd_config_capable);
+ const std::string caps="OSDWIN1;ROMXFR1;UART8M1";
+ std::vector<uint8_t> supported={0xaa,0,uint8_t(caps.size()+1),2};supported.insert(supported.end(),caps.begin(),caps.end());
+ feed(supported);parse();assert(rom_capable);
+ rom_owned=true;const std::vector<uint8_t> ack={0xaa,0,22,0x31,1,2,3,4};feed(ack);parse();
+ for(auto expected:ack){uint8_t got=0;assert(tc_rom_uart_rx_take(&got)==1&&got==expected);}
+ feed(ack);tc_rom_uart_rx_flush();uint8_t empty=0;assert(tc_rom_uart_rx_take(&empty)==0);
+ // Ownership changes after the legacy guard, immediately before its critical
+ // section. It must not consume any ACK byte from the new transfer owner.
+ rom_owned=false;feed(ack);switch_on_enter=true;
+ assert(uart1_rx_take(&empty)==0&&rom_owned);
+ for(auto expected:ack){uint8_t got=0;assert(tc_rom_uart_rx_take(&got)==1&&got==expected);}
+ rom_owned=false;feed({0xaa,0,4,2,'O','L','D'});parse();assert(!rom_capable);
  std::puts("UART RX passed: 32-byte FIFO reproducer, complete 85-byte reply, IRQ registration, fragmented/mixed frames, 515-byte frame, ring wrap/overflow/recovery, old-core rejection");
 }
 '''
 p=build/'uart_rx_test.cpp';p.write_text(code,encoding='utf-8',newline='\n');extra=[]
 if os.name=='nt':extra=['-B'+subprocess.check_output(['cygpath','-m','/ucrt64/bin'],text=True,encoding='utf-8').strip()+'/']
 exe=build/('uart_rx_test.exe' if os.name=='nt' else 'uart_rx_test')
-subprocess.run(['g++',*extra,'-std=c++17','-Wall','-Wextra','-Werror','-Wno-unused-parameter','-DUI16_SYSTEM_MENU',str(p),'-o',str(exe)],check=True)
+subprocess.run(['g++',*extra,'-std=c++17','-Wall','-Wextra','-Werror','-Wno-unused-parameter','-DUI16_SYSTEM_MENU','-DTC_ROM_UART',str(p),'-o',str(exe)],check=True)
 subprocess.run([str(exe)],check=True)

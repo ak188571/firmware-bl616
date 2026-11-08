@@ -75,11 +75,16 @@ static unsigned save_calls=0;static bool saved_reset=false,save_scope_seen=false
 bool ui16_save_crt_override(const Ui16RomIdentity &,const Ui16CrtSettings &,FIL &file,void *buffer,unsigned capacity,bool reset=false){
  assert(&file==&fcore&&buffer==fbuf&&capacity==BLOCK_SIZE&&storage_depth==1);++save_calls;saved_reset=reset;save_scope_seen=sd_scope;if(save_causes_fault)sd_fault=true;return true;
 }
-void overlay_status(const char *,...){}
+static unsigned bottom_notices=0,legacy_clears=0;
+void overlay_clear(){assert(!owner&&_overlay_on==0);++legacy_clears;}
+void overlay_clear_logo(){assert(!owner&&_overlay_on==0);}
+void overlay_status(const char *message,...){
+ if(std::string(message)=="Preparing SNES core"){assert(!owner&&_overlay_on==0);++bottom_notices;}
+}
 static int tx_done=0,uart_device=0;
 static int *uart1_dev=&uart_device;
 void ui16_send_starting_game(){++starting_frames;}
-int bflb_uart_wait_tx_done(int *dev){assert(dev==uart1_dev);++tx_waits;return tx_done;}
+int bflb_uart_wait_tx_done(int *dev){assert(dev==uart1_dev);if(bottom_notices>tx_waits)assert(_overlay_on==0);++tx_waits;return tx_done;}
 void send_blank_packet(){}
 int get_core_id(){++requests;now+=200;return id;}
 static int result=0;static bool started=true;
@@ -161,9 +166,10 @@ int main(){
  ui16_hw_display_owner(true,nullptr);assert(owner&&overlay_on());
  ui16_hw_display_owner(false,nullptr);assert(!owner&&overlay_on());
  const auto before_notice=now;
- assert(ui16_hw_starting(nullptr)&&starting_frames==1&&tx_waits==1&&now==before_notice+500);
+ assert(ui16_hw_starting(2,nullptr)&&owner&&overlay_on()&&legacy_clears==1&&bottom_notices==1&&starting_frames==0&&tx_waits==1&&now==before_notice+500);
  tx_done=-1;
- assert(!ui16_hw_starting(nullptr)&&starting_frames==2&&tx_waits==2&&now==before_notice+500);
+ assert(!ui16_hw_starting(2,nullptr)&&owner&&overlay_on()&&legacy_clears==2&&bottom_notices==2&&tx_waits==2&&now==before_notice+500);
+ assert(!ui16_hw_starting(1,nullptr)&&starting_frames==1&&legacy_clears==2);
  overlay(0);pads={{0,0,0x0200,0},{0,0,0x0200,0},{0,0,0x0002,0},{0,0,0,0},{0,0,0x84,0}};
  send_hid_to_core();assert((bytes==std::vector<unsigned>{2,0,0,0,0,2,0,0,0,0,0,0}));
  // Split chords from two controllers must not open the OSD.
@@ -321,7 +327,7 @@ void ui16_hw_display_owner(bool,void *);
 Ui16GameList ui16_load_for_core(int,const char *,void *);
 void fpga_use_ui16_display(bool);
 bool ui16_hw_osd_ready(void *);
-bool ui16_hw_starting(void *);
+bool ui16_hw_starting(int core_id,void *);
 void overlay_osd_window(unsigned,unsigned,unsigned,unsigned);
 extern bool crt_stage1_capable,restart_capable,core_running;
 extern bool snes_crt_sd_session;

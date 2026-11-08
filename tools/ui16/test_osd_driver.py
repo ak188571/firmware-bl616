@@ -28,6 +28,8 @@ static int depth=0;
 static std::vector<unsigned> bytes;
 static volatile bool osd_config_ready=false,osd_config_capable=false,crt_stage1_capable=false,crt_blur_capable=false,crt_scanline_capable=false,restart_capable=false;
 static bool reply=true,supported=true;
+static bool rom_capable=false;
+void tc_rom_uart_capabilities(bool protocol,bool uart8){rom_capable=protocol&&uart8;}
 void fpga_tx_header(int command,int len){bytes.insert(bytes.end(),{0xaa,unsigned(len>>8),unsigned(len&255),unsigned(command)});if(command==2&&reply){osd_config_ready=true;osd_config_capable=supported;}}
 void fpga_tx_byte(unsigned char b){bytes.push_back(b);}
 unsigned long long clock_ms=0;
@@ -37,12 +39,20 @@ void delay(unsigned ms){clock_ms+=ms;}
 '''+source+query+r'''
 void feed_config(const std::string &s){
     unsigned pos=4,len=s.size()+1;
-    char osd_tag[7]={};unsigned osd_tag_count=0;bool osd_tag_found=false,crt_tag_found=false,blur_tag_found=false,scan_tag_found=false,restart_tag_found=false;
+    char osd_tag[7]={};unsigned osd_tag_count=0;bool osd_tag_found=false,crt_tag_found=false,blur_tag_found=false,scan_tag_found=false,restart_tag_found=false,rom_tag_found=false,uart8_tag_found=false;
     for(unsigned char ch:s){
 '''+parser+r'''
     }
 }
 int main(){
+    overlay_clear_logo();
+    std::vector<unsigned> logo_packets;
+    for(unsigned row=28;row<32;++row){
+        logo_packets.insert(logo_packets.end(),{0xaa,0,3,4,0,row,0xaa,0,33,5});
+        logo_packets.insert(logo_packets.end(),32,0);
+    }
+    assert(bytes==logo_packets&&depth==0);
+    bytes.clear();
     overlay_osd_window(12,1,19,6);assert((bytes==std::vector<unsigned>{0xaa,0,5,0x10,12,1,19,6}));
     bytes.clear();overlay_osd_key(12);assert((bytes==std::vector<unsigned>{0xaa,0,3,0x11,0,12}));
     for(int value:{0,1}){bytes.clear();overlay(value);assert((bytes==std::vector<unsigned>{0xaa,0,5,9,0,0,0,0,0xaa,0,2,8,unsigned(value)}));}
@@ -61,6 +71,8 @@ int main(){
     feed_config("TangCore;OSDWIN1;RSTROM1");assert(restart_capable&&!crt_stage1_capable);
     feed_config("TangCore;RSTROM1");assert(!restart_capable);
     feed_config("TangCore;OSDWIN1");assert(!restart_capable);
+    feed_config("TangCore;OSDWIN1;ROMXFR1;UART8M1");assert(rom_capable);
+    feed_config("TangCore;OSDWIN1;ROMXFR1");assert(!rom_capable);
     supported=true;assert(ui16_hw_osd_ready(nullptr));supported=false;assert(!ui16_hw_osd_ready(nullptr));
     reply=false;clock_ms=0;assert(!ui16_hw_osd_ready(nullptr)&&clock_ms==400);
     std::puts("Actual OSD driver passed: window/key packets, neutral-before-open/close, task-owned capture, marker parser, old-core rejection, bounded capability wait");

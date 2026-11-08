@@ -1,0 +1,2 @@
+#pragma once
+enum {UART_STATUS_OFFSET=0,UART_STS_UTX_BUS_BUSY=1};

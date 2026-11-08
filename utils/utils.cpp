@@ -1,4 +1,5 @@
 #include "utils.h"
+#include "tc_rom_uart.h"
 
 #ifdef UI16_SYSTEM_MENU
 #include "ui16_display_mode.h"
@@ -12,6 +13,7 @@ void fpga_use_ui16_display(bool active) {
 #endif
 
 void fpga_tx_header(int cmd, int len) {
+    if(tc_rom_uart_owned())return;
 #ifdef UI16_SYSTEM_MENU
     cmd = ui16_display_command(cmd, ui16_display_active);
 #endif
@@ -22,6 +24,7 @@ void fpga_tx_header(int cmd, int len) {
 }
 
 void fpga_tx_byte(uint8_t b) {
+    if(tc_rom_uart_owned())return;
     bflb_uart_putchar(uart1_dev, b);
 }
 

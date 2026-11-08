@@ -21,6 +21,15 @@ static std::vector<unsigned char> file,sent;
 static int opens,closes,payload_reads,loading,starts,stops;
 static int read_error=-1,short_read=-1,oversize=-1;
 static bool fail_open=false,fail_close=false,fail_seek=false,in_payload=false;
+#ifdef TC_ROM_UART
+static bool new_capable=false,new_success=true;
+static unsigned new_calls=0;
+bool tc_rom_uart_capable(){return new_capable;}
+bool tc_rom_uart_load_snes(FIL &fp,std::uint32_t off,std::uint32_t count,const std::uint8_t *header){
+    assert(&fp==&fcore&&header==fbuf&&count==file.size()-off&&!core_running);
+    ++new_calls;return new_success;
+}
+#endif
 static void setup(unsigned kind=0,unsigned prefix=0){
     const unsigned size=kind==2?0x410000:0x10000;
     file.resize(size+prefix);
@@ -99,4 +108,12 @@ int main(){
     setup();file.clear();assert(loadsnes("sd:snes/empty.smc")!=0&&!core_running&&closes==1);
     setup();assert(loadsnes("sd:snes/wrong.bin")!=0&&!core_running&&opens==0);
     std::puts("SNES loader PASS: Lo/Hi/ExHi, raw/copier512, exact transfer, open/seek/read/short/oversize/close failure, malformed size/header, no false running state");
+#ifdef TC_ROM_UART
+    for(bool successful:{false,true}){
+        setup();new_capable=true;new_success=successful;new_calls=0;
+        assert((loadsnes("sd:snes/synthetic.sfc")==0)==successful);
+        assert(core_running==successful&&new_calls==1&&starts==0&&stops==0&&sent.empty()&&closes==1);
+    }
+    std::puts("Negotiated SNES path: success and failure never call legacy loading/data/release");
+#endif
 }

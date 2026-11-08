@@ -1,6 +1,9 @@
 extern "C" {
 #include "bflb_gpio.h"
 #include "board.h"
+#ifdef TC_ROM_UART
+#include "bl616_glb.h"
+#endif
 }
 
 #include "utils.h"
@@ -50,6 +53,11 @@ void init_gpio_and_uart() {
     bflb_gpio_uart_init(gpio_dev, GPIO_PIN_27, GPIO_UART_FUNC_UART1_RX);    // JTAG connector pin 7 (pin8 is GND, pin1 is VCC)
 #endif
 
+#ifdef TC_ROM_UART
+    // App-local clock selection. UART0/1 share this source; UART0 is not used
+    // after the application selects UART1 as console below. SDK stays immutable.
+    GLB_Set_UART_CLK(ENABLE,HBN_UART_CLK_MUXPLL_160M,0);
+#endif
     /* Set up Core control UART parameters */
     struct bflb_uart_config_s uart1_cfg = {
         // .baudrate = 1000000,

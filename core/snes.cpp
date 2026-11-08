@@ -5,6 +5,8 @@
 #include "utils.h"
 #include "cores.h"
 #include "overlay.h"
+#include "tc_launch_trace.h"
+#include "tc_rom_uart.h"
 // return 0 if snes header is successfully parsed at off
 // typ 0: LoROM, 1: HiROM, 2: ExHiROM
 int parse_snes_header(FIL *fp, int pos, int file_size, int typ, unsigned char *hdr,
@@ -85,6 +87,7 @@ int loadsnes(const char *fname) {
     // parse SNES header from ROM file
     int off = size & 0x3ff;		// rom header (0 or 512)
     int header_pos;
+    std::uint64_t read_start=0, read_elapsed=0, enqueue_start=0;
     if (!size || (off != 0 && off != 512)) {r=1;goto loadsnes_close_file;}
     overlay_status("snes rom header offset: %d\n", off);
     
@@ -102,7 +105,16 @@ int loadsnes(const char *fname) {
         }
     }
 
+#ifdef TC_ROM_UART
+    if(tc_rom_uart_capable()){
+        // A failed negotiated transfer never drops into the unverified legacy
+        // loader or sends its loading=0 command. The caller restores monitor.
+        r=tc_rom_uart_load_snes(fcore,off,static_cast<unsigned>(size-off),fbuf)?0:1;
+        goto loadsnes_close_file;
+    }
+#endif
     // load actual ROM
+    tc_launch_mark(TcLaunchEvent::RomBegin);
     set_loading_state(1);		// enable game loading, this resets SNES
     loading_started = true;
 
@@ -117,9 +129,13 @@ int loadsnes(const char *fname) {
     while (total < static_cast<unsigned>(size-off)) {
         const UINT remaining = static_cast<unsigned>(size-off)-total;
         const UINT wanted = remaining < 1024 ? remaining : 1024;
+        read_start=tc_launch_clock();
         if ((r = f_read(&fcore, fbuf, wanted, &br)) != FR_OK)goto loadsnes_snes_end;
+        read_elapsed=tc_launch_clock()-read_start;
         if (br != wanted) {r=1;goto loadsnes_snes_end;}
+        enqueue_start=tc_launch_clock();
         send_fbuf_data(br);
+        tc_launch_block(br,read_elapsed,tc_launch_clock()-enqueue_start);
         total += br;
         if ((total & 0xffff) == 0) {	// display progress every 64KB
             overlay_status("%d/%dK", total >> 10, size >> 10);
@@ -133,13 +149,17 @@ int loadsnes(const char *fname) {
             overlay_printf(" ROM=%d RAM=%d                 ", 1 << rom_size, ram_size ? (1 << ram_size) : 0);
         }
     }
+    tc_launch_mark(TcLaunchEvent::RomQueued);
     r = 0;
 
 loadsnes_snes_end:
 loadsnes_close_file:
     closed = f_close(&fcore);
     if (r == 0 && closed != FR_OK)r=closed;
-    if (loading_started)set_loading_state(0);
+    if (loading_started){
+        set_loading_state(0);
+        tc_launch_mark(TcLaunchEvent::ReleaseQueued);
+    }
     if (r == 0) {
         core_running = true;
         overlay_status("Success");
