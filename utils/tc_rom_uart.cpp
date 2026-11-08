@@ -25,7 +25,7 @@ bool acquire(){
     return false;
 }
 static ATTR_NOCACHE_NOINIT_RAM_SECTION std::uint8_t source_buffers[2][4096] __attribute__((aligned(64)));
-static ATTR_NOCACHE_NOINIT_RAM_SECTION std::uint8_t frame_storage[TcRom::MaxFrame] __attribute__((aligned(64)));
+static ATTR_NOCACHE_NOINIT_RAM_SECTION std::uint8_t frame_storage[2*TcRom::MaxFrame] __attribute__((aligned(64)));
 static ATTR_NOCACHE_NOINIT_RAM_SECTION bflb_dma_channel_lli_pool_s lli[1] __attribute__((aligned(64)));
 bflb_device_s *dma=nullptr;
 std::uint32_t session_counter=0;
@@ -54,10 +54,9 @@ bool prepare_dma(){
     }
     return !bflb_dma_channel_isbusy(dma);
 }
-bool exchange(void *,const std::uint8_t *request,std::size_t size,std::uint8_t *reply,std::size_t *reply_size,
-              std::uint32_t timeout,void (*pump)(void *),void *pump_context){
-    if(!exclusive||!dma||size>TcRom::MaxFrame||*reply_size<25||!drained())return false;
-    tc_rom_uart_rx_flush();
+bool send_frame(void *,const std::uint8_t *request,std::size_t size,std::uint32_t timeout,
+                void (*pump)(void *),void *pump_context){
+    if(!exclusive||!dma||size>TcRom::MaxFrame||!drained())return false;
     bflb_dma_channel_lli_transfer_s transfer{};
     transfer.src_addr=reinterpret_cast<std::uintptr_t>(request);transfer.dst_addr=DMA_ADDR_UART1_TDR;transfer.nbytes=size;
     const auto enqueue_start=tc_launch_clock();
@@ -71,31 +70,39 @@ bool exchange(void *,const std::uint8_t *request,std::size_t size,std::uint8_t *
 #endif
     const auto start=bflb_mtimer_get_time_ms();
     if(pump)pump(pump_context);
+    while(bflb_dma_channel_isbusy(dma)&&bflb_mtimer_get_time_ms()-start<timeout){}
+    if(!bflb_dma_channel_isbusy(dma)&&drained())return true;
+    bflb_dma_channel_stop(dma);bflb_uart_link_txdma(uart1_dev,false);
+    bflb_uart_feature_control(uart1_dev,UART_CMD_CLR_TX_FIFO,0);return false;
+}
+bool receive_frame(void *,std::uint8_t *reply,std::size_t *reply_size,std::uint32_t timeout){
+    if(*reply_size<25)return false;
+    const auto start=bflb_mtimer_get_time_ms();
     std::uint8_t window[25]{};unsigned used=0;
     while(bflb_mtimer_get_time_ms()-start<timeout){
         std::uint8_t byte=0;const int got=tc_rom_uart_rx_take(&byte);
-        if(got<0){used=0;continue;}
-        if(!got)continue;
+        if(got<0){used=0;continue;}if(!got)continue;
         if(used==sizeof window){std::memmove(window,window+1,sizeof window-1);--used;}
         window[used++]=byte;
-        if(used==sizeof window){
-            TcRom::View answer;
-            if(TcRom::decode(window,sizeof window,answer)&&answer.command==TcRom::Reply&&answer.count==1&&
-               static_cast<std::uint8_t>(answer.op)==request[5]&&answer.session==TcRom::get32(request+6)&&
-               answer.sequence==TcRom::get32(request+10)){
-                // A delayed ACK from the previous attempt may arrive while
-                // this retry is still being transmitted. Keep its source
-                // storage alive until DMA ends; failure uses the stop below.
-                while(bflb_dma_channel_isbusy(dma)&&bflb_mtimer_get_time_ms()-start<timeout){}
-                if(bflb_dma_channel_isbusy(dma)||!drained())break;
-                std::memcpy(reply,window,sizeof window);*reply_size=sizeof window;return true;
-            }
+        TcRom::View answer;
+        if(used==sizeof window&&TcRom::decode(window,sizeof window,answer)&&answer.command==TcRom::Reply&&answer.count==1){
+            std::memcpy(reply,window,sizeof window);*reply_size=sizeof window;return true;
         }
     }
-    bflb_dma_channel_stop(dma);bflb_uart_link_txdma(uart1_dev,false);
-    // Drop an incomplete outgoing frame. The receiver's frame timeout and CRC
-    // reject it; retries use the exact same session/sequence/offset.
-    bflb_uart_feature_control(uart1_dev,UART_CMD_CLR_TX_FIFO,0);return false;
+    return false;
+}
+bool exchange(void *context,const std::uint8_t *request,std::size_t size,std::uint8_t *reply,std::size_t *reply_size,
+              std::uint32_t timeout,void (*pump)(void *),void *pump_context){
+    tc_rom_uart_rx_flush();
+    if(!send_frame(context,request,size,timeout,pump,pump_context))return false;
+    const auto start=bflb_mtimer_get_time_ms();
+    while(bflb_mtimer_get_time_ms()-start<timeout){
+        if(!receive_frame(context,reply,reply_size,timeout))return false;
+        TcRom::View answer;
+        if(TcRom::decode(reply,*reply_size,answer)&&static_cast<std::uint8_t>(answer.op)==request[5]&&
+           answer.session==TcRom::get32(request+6)&&answer.sequence==TcRom::get32(request+10))return true;
+    }
+    return false;
 }
 struct Stream {
     FIL *file=nullptr;
@@ -144,7 +151,7 @@ bool tc_rom_uart_load_snes(FIL &file,std::uint32_t off,std::uint32_t bytes,const
     tc_rom_uart_rx_flush();
     auto id=static_cast<std::uint32_t>(bflb_mtimer_get_time_us())^(++session_counter*0x9e3779b9u);
     if(!id)id=1;
-    TcRom::Session session({nullptr,exchange},id,frame_storage,sizeof frame_storage);
+    TcRom::Session session({nullptr,exchange,send_frame,receive_frame},id,frame_storage,sizeof frame_storage);
 #ifdef TC_LAUNCH_TRACE
     if(tc_launch_record.active)tc_launch_record.rom_baud=8000000;
 #endif
@@ -153,6 +160,7 @@ bool tc_rom_uart_load_snes(FIL &file,std::uint32_t off,std::uint32_t bytes,const
     bool success=session.begin(bytes+64);
     if(success)success=session.link_rate(8000000);
     if(success){delay(6);success=set_rate(8000000)&&session.link_sync();}
+    if(success)success=session.negotiate_window();
     if(success)success=session.stream({&source,Stream::read,Stream::pump});
     if(success)tc_launch_mark(TcLaunchEvent::RomQueued);
     if(success){end_started=true;success=session.finish();}
@@ -168,6 +176,7 @@ bool tc_rom_uart_load_snes(FIL &file,std::uint32_t off,std::uint32_t bytes,const
     if(tc_launch_record.active){
         tc_launch_record.requests=session.stats().requests;tc_launch_record.retries=session.stats().retries;
         tc_launch_record.stream_crc=session.stats().crc;
+        tc_launch_record.rom_window=session.stats().window;
     }
 #endif
     bflb_dma_channel_stop(dma);bflb_uart_link_txdma(uart1_dev,false);

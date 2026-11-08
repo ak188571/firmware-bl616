@@ -40,6 +40,7 @@ bool tc_launch_export(const char *rom,int core_id,FIL &file,void *buffer,UINT ca
     if(record.rom_baud!=2000000)text.add("transport=ROMXFR1\nstream_boundary=DATA_ACK\nrequests=%lu\nretries=%lu\nstream_crc=%08lx\nEndAck_us=%llu\n",
         static_cast<unsigned long>(record.requests),static_cast<unsigned long>(record.retries),
         static_cast<unsigned long>(record.stream_crc),static_cast<unsigned long long>(record.end_ack_us));
+    if(record.rom_baud!=2000000)text.add("window=%lu\n",static_cast<unsigned long>(record.rom_window));
     for(unsigned i=0;i<static_cast<unsigned>(TcLaunchEvent::Count);++i)
         if(record.seen&(1u<<i))text.add("%s_us=%llu\n",names[i],static_cast<unsigned long long>(record.elapsed_us[i]));
     text.add("END=1\n");

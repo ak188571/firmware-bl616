@@ -13,6 +13,7 @@ struct TcLaunchRecord {
     std::uint64_t sd_read_us=0, uart_enqueue_us=0;
     std::uint32_t seen=0, rom_bytes=0, blocks=0;
     std::uint32_t rom_baud=2000000, requests=0, retries=0, stream_crc=0;
+    std::uint32_t rom_window=1;
     std::uint64_t end_ack_us=0;
     bool active=false, success=false;
 };

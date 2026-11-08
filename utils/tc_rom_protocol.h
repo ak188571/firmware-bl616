@@ -7,7 +7,7 @@
 namespace TcRom {
 constexpr std::size_t MaxData=1024, Overhead=24, MaxFrame=MaxData+Overhead;
 constexpr std::uint8_t Request=0x30, Reply=0x31, Version=1;
-enum class Op:std::uint8_t {Begin=1,Data=2,End=3,Start=4,Abort=5,LinkRate=0x10,LinkSync=0x11};
+enum class Op:std::uint8_t {Begin=1,Data=2,End=3,Start=4,Abort=5,Window=6,LinkRate=0x10,LinkSync=0x11};
 enum class Status:std::uint8_t {Ok=0,Format=1,Session=2,Order=3,Range=4,State=5,Busy=6,Integrity=7,Backend=8};
 struct View {
     std::uint8_t command=0;
@@ -27,19 +27,25 @@ struct Transport {
     // the next source buffer while the transport's DMA transfer is in flight.
     bool (*exchange)(void *,const std::uint8_t *,std::size_t,std::uint8_t *,std::size_t *,
                      std::uint32_t,void (*pump)(void *),void *)=nullptr;
+    // Optional full-duplex transport. send retains ownership until all bytes
+    // have left DMA/the physical transmitter; it never discards incoming ACKs.
+    bool (*send)(void *,const std::uint8_t *,std::size_t,std::uint32_t,
+                 void (*pump)(void *),void *)=nullptr;
+    bool (*receive)(void *,std::uint8_t *,std::size_t *,std::uint32_t)=nullptr;
 };
 struct Source {
     void *context=nullptr;
     bool (*read)(void *,std::uint32_t,std::uint8_t *,std::uint16_t,std::uint16_t *)=nullptr;
     void (*pump)(void *)=nullptr;
 };
-struct Stats {std::uint32_t requests=0,retries=0,blocks=0,bytes=0,crc=0;};
+struct Stats {std::uint32_t requests=0,retries=0,blocks=0,bytes=0,crc=0,window=1;};
 class Session {
 public:
     Session(Transport transport,std::uint32_t id,std::uint8_t *storage,std::size_t capacity):
         transport_(transport),id_(id),storage_(storage),capacity_(capacity){}
     bool begin(std::uint32_t total);
     bool stream(Source source);
+    bool negotiate_window();
     bool finish();
     bool start();
     bool link_rate(std::uint32_t baud);
@@ -49,6 +55,9 @@ public:
 private:
     bool request(Op,const std::uint8_t *,std::uint16_t,std::uint32_t timeout=50,
                  void (*pump)(void *)=nullptr,void *pump_context=nullptr,bool any_offset=false);
+    bool stream_window(Source);
+    Status last_status_=Status::Busy;
+    bool window_two_=false;
     Transport transport_;
     std::uint32_t id_,total_=0,offset_=0,sequence_=0,crc_=0xffffffffu;
     std::uint8_t *storage_;

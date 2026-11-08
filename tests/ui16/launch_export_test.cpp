@@ -49,8 +49,10 @@ int main(){
     short_write=bad_sync=bad_close=bad_open=false;
     tc_launch_record.rom_baud=8000000;tc_launch_record.requests=2057;tc_launch_record.retries=2;
     tc_launch_record.stream_crc=0x12345678;tc_launch_record.end_ack_us=3000000;
+    tc_launch_record.rom_window=2;
     assert(tc_launch_export("sd:snes/fast.sfc",2,file,buffer,sizeof(buffer),path,sizeof(path)));
     assert(files[path].find("TC_ROMXFR1_TRACE_V2\ncore=2\nbaud=8000000\n")==0);
+    assert(files[path].find("window=2\n")!=std::string::npos);
     assert(files[path].find("stream_boundary=DATA_ACK\nrequests=2057\nretries=2\nstream_crc=12345678\nEndAck_us=3000000\n")!=std::string::npos);
     std::puts("Trace export: post-measurement guard, exclusive new files, exact metadata, short write/sync/close/open errors passed");
 }

@@ -19,7 +19,7 @@ extern "C" int __wrap_bflb_uart_putchar(bflb_device_s *,int);
 static bflb_device_s uart{1},other{2},dma_dev{3};
 bflb_device_s *uart1_dev=&uart;
 static std::uint32_t ticks=0,baud=2000000,next_sequence=0,stream_crc=0xffffffffu;
-static std::vector<std::uint8_t> input,committed,last;
+static std::vector<std::uint8_t> input,committed,last,previous;
 static std::deque<std::uint8_t> rx;
 static bflb_dma_channel_lli_transfer_s transfer{};
 static bool pumping=false,verified=false,running=false,aborted=false,fail_dma=false,lose=false,damage=false,all_lost=false;
@@ -28,6 +28,7 @@ static std::set<void*> buffers;
 static std::uint8_t header[64];
 static bool irq_enabled=true;
 static bool delay_dma=false,stuck_dma=false,channel_active=false;
+static bool old_core=false,window_silent=false;
 static unsigned busy_polls=0,busy_events=0;
 extern "C" std::uintptr_t bflb_irq_save(){const auto old=irq_enabled;irq_enabled=false;return old;}
 extern "C" void bflb_irq_restore(std::uintptr_t old){irq_enabled=old;}
@@ -68,19 +69,21 @@ extern "C" void bflb_dma_channel_start(bflb_device_s *){
     if(damage&&wire[5]==2){frame[20]^=1;damage=false;}
     if(!decode(frame.data(),frame.size(),f))return;
     std::uint8_t status=0;
-    if(f.op==Op::Begin){assert(f.count==4);committed.clear();last.clear();next_sequence=0;stream_crc=0xffffffffu;}
+    if(f.op==Op::Begin){assert(f.count==4);committed.clear();last.clear();previous.clear();next_sequence=0;stream_crc=0xffffffffu;}
     else if(f.op==Op::Data){
         assert(baud==8000000);
-        if(frame!=last){
-            assert(f.offset==committed.size()&&f.sequence==next_sequence);
+        if(frame!=last&&frame!=previous){
+            if(f.offset!=committed.size()||f.sequence!=next_sequence)status=3;
+            else {
             committed.insert(committed.end(),f.data,f.data+f.count);++next_sequence;
-            stream_crc=crc_update(stream_crc,f.data,f.count);last=frame;
+            stream_crc=crc_update(stream_crc,f.data,f.count);previous=last;last=frame;}
         }
     }else if(f.op==Op::End){verified=get32(f.data)==(stream_crc^0xffffffffu);assert(verified);}
+    else if(f.op==Op::Window){if(old_core)status=1;if(window_silent)return;}
     else if(f.op==Op::Start){assert(verified&&baud==2000000);running=true;++starts;}
     else if(f.op==Op::Abort){aborted=true;running=false;}
     std::array<std::uint8_t,25> reply{};
-    auto n=encode(reply.data(),reply.size(),{Reply,f.op,f.session,f.sequence,std::uint32_t(committed.size()),&status,1});assert(n==25);
+    auto n=encode(reply.data(),reply.size(),{Reply,f.op,f.session,f.sequence,f.op==Op::Data&&status==0?f.offset+f.count:std::uint32_t(committed.size()),&status,1});assert(n==25);
     if(all_lost)return;
     if(lose&&f.op==Op::Data){lose=false;return;}
     rx.insert(rx.end(),reply.begin(),reply.end());
@@ -106,6 +109,7 @@ static void reset(unsigned bytes,unsigned prefix){
     buffers.clear();reads=starts=real_puts=critical=0;baud=2000000;rx.clear();committed.clear();
     pumping=verified=running=aborted=fail_dma=lose=damage=all_lost=false;fail_read=short_read=~0u;
     delay_dma=stuck_dma=channel_active=false;busy_polls=busy_events=0;
+    old_core=window_silent=false;
     tc_rom_uart_capabilities(true,true);assert(tc_rom_uart_capable()&&!tc_rom_uart_owned());
     tc_launch_begin();
 }
@@ -119,12 +123,19 @@ int main(){
         assert(std::equal(committed.begin()+64,committed.end(),input.begin()+prefix));
         assert(reads==(bytes+4095)/4096&&buffers.size()==(bytes<=4096?1u:2u));
 #ifdef TC_LAUNCH_TRACE
-        assert(tc_launch_record.rom_baud==8000000&&tc_launch_record.retries==2&&tc_launch_record.rom_bytes==bytes);
+        assert(tc_launch_record.rom_baud==8000000&&tc_launch_record.retries>=2&&tc_launch_record.rom_bytes==bytes);
         assert(tc_launch_record.end_ack_us>0&&tc_launch_record.stream_crc==(stream_crc^0xffffffffu));
 #endif
     }
     reset(8192,0);delay_dma=true;FIL delayed{0,input.size()};
     assert(tc_rom_uart_load_snes(delayed,0,8192,header)&&running&&busy_events>0&&!busy_polls);
+    reset(8192,0);old_core=true;FIL legacy{0,input.size()};
+    assert(tc_rom_uart_load_snes(legacy,0,8192,header)&&running&&committed.size()==8256);
+#ifdef TC_LAUNCH_TRACE
+    assert(tc_launch_record.rom_window==1);
+#endif
+    reset(8192,0);window_silent=true;FIL silent{0,input.size()};
+    assert(!tc_rom_uart_load_snes(silent,0,8192,header)&&!running&&committed.empty());
     for(unsigned fault=0;fault<6;++fault){
         reset(16384,0);FIL file{0,input.size()};
         if(fault==0)fail_read=0;if(fault==1)fail_read=3;if(fault==2)short_read=2;if(fault==3)fail_dma=true;if(fault==4)all_lost=true;if(fault==5)stuck_dma=true;
