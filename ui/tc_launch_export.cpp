@@ -29,7 +29,10 @@ bool tc_launch_export(const char *rom,int core_id,FIL &file,void *buffer,UINT ca
        !(tc_launch_record.seen&(1u<<static_cast<unsigned>(TcLaunchEvent::Finished))))return false;
     const auto record=tc_launch_record;
     Text text{static_cast<char*>(buffer),capacity};
-    text.add("%s\ncore=%d\nbaud=%lu\nrom_hex=",record.rom_baud==2000000?"TC_UART_BASELINE_V1":"TC_ROMXFR1_TRACE_V2",
+    const char *format=record.rom_baud==2000000?"TC_UART_BASELINE_V1":
+        record.rom_pipeline?(record.profile_enabled?"TC_ROMXFR1_PROFILE_V4":"TC_ROMXFR1_TRACE_V4"):
+        record.profile_enabled?"TC_ROMXFR1_PROFILE_V3":"TC_ROMXFR1_TRACE_V2";
+    text.add("%s\ncore=%d\nbaud=%lu\nrom_hex=",format,
              core_id,static_cast<unsigned long>(record.rom_baud));
     for(const unsigned char *p=reinterpret_cast<const unsigned char*>(rom);*p;++p)text.add("%02x",unsigned(*p));
     text.add("\norigin_us=%llu\nsuccess=%u\nseen=%lu\nrom_bytes=%lu\nblocks=%lu\nsd_read_us=%llu\nuart_enqueue_us=%llu\n",
@@ -41,8 +44,30 @@ bool tc_launch_export(const char *rom,int core_id,FIL &file,void *buffer,UINT ca
         static_cast<unsigned long>(record.requests),static_cast<unsigned long>(record.retries),
         static_cast<unsigned long>(record.stream_crc),static_cast<unsigned long long>(record.end_ack_us));
     if(record.rom_baud!=2000000)text.add("window=%lu\n",static_cast<unsigned long>(record.rom_window));
+    if(record.rom_pipeline)text.add("cpu_pipeline=1\ncpu_pumps=%lu\ncpu_prepared=%lu\ncpu_acks=%lu\ncpu_crc=%lu\n",
+        static_cast<unsigned long>(record.cpu_pumps),static_cast<unsigned long>(record.cpu_prepared),
+        static_cast<unsigned long>(record.cpu_acks),static_cast<unsigned long>(record.cpu_crc));
     for(unsigned i=0;i<static_cast<unsigned>(TcLaunchEvent::Count);++i)
         if(record.seen&(1u<<i))text.add("%s_us=%llu\n",names[i],static_cast<unsigned long long>(record.elapsed_us[i]));
+    if(record.profile_enabled){
+        text.add("profile_error=%lu\nprofile_clock_reads=%lu\nclock_probe_1000_us=%llu\n",
+            static_cast<unsigned long>(record.profile_error),static_cast<unsigned long>(record.profile_clock_reads),
+            static_cast<unsigned long long>(record.profile_clock_calibration_us));
+        const char *const activities[]={"cpu","copy","frame_crc","stream_crc","reply_crc","sd","tx_setup","tx_wait","tx_drain","ack_cpu","ack_wait"};
+        static_assert(sizeof activities/sizeof activities[0]==TcRom::ActivityCount,"Activity names");
+        for(unsigned phase=0;phase<2;++phase){
+            const char prefix=phase==0?'D':'E';const auto &r=record.profile[phase];
+            text.add("%c_wall_us=%llu\n",prefix,static_cast<unsigned long long>(r.elapsed_us));
+            for(unsigned i=0;i<TcRom::ActivityCount;++i)text.add("%c_%s_us=%llu\n",prefix,activities[i],static_cast<unsigned long long>(r.us[i]));
+            for(unsigned i=2;i<=5;++i)text.add("%c_%s_calls=%lu\n%c_%s_bytes=%lu\n",prefix,activities[i],static_cast<unsigned long>(r.calls[i]),prefix,activities[i],static_cast<unsigned long>(r.units[i]));
+            text.add("%c_sd_max_us=%llu\n%c_ack_wait_max_us=%llu\n",prefix,static_cast<unsigned long long>(r.max_us[5]),prefix,static_cast<unsigned long long>(r.max_us[10]));
+            text.add("%c_tx_frames=%lu\n%c_tx_bytes=%lu\n%c_tx_failures=%lu\n",prefix,static_cast<unsigned long>(r.tx_frames),prefix,static_cast<unsigned long>(r.tx_bytes),prefix,static_cast<unsigned long>(r.tx_failures));
+            text.add("%c_tx_envelope_us=%llu\n%c_tx_gap_us=%llu\n%c_tx_gap_max_us=%llu\n%c_tx_span_us=%llu\n%c_sd_in_send_us=%llu\n",
+                prefix,static_cast<unsigned long long>(r.tx_envelope_us),prefix,static_cast<unsigned long long>(r.tx_gap_us),
+                prefix,static_cast<unsigned long long>(r.tx_gap_max_us),prefix,static_cast<unsigned long long>(r.tx_span_us),prefix,static_cast<unsigned long long>(r.sd_in_send_us));
+            text.add("%c_ack_calls=%lu\n%c_ack_ready=%lu\n%c_ack_empty_polls=%lu\n",prefix,static_cast<unsigned long>(r.ack_calls),prefix,static_cast<unsigned long>(r.ack_ready),prefix,static_cast<unsigned long>(r.ack_empty_polls));
+        }
+    }
     text.add("END=1\n");
     if(!text.good)return false;
     bool opened=false;

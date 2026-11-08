@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include "tc_rom_measure.h"
 
 // RAM-only timing. No UART traffic, allocation, filesystem I/O, or extra waits.
 enum class TcLaunchEvent : unsigned {
@@ -14,7 +15,12 @@ struct TcLaunchRecord {
     std::uint32_t seen=0, rom_bytes=0, blocks=0;
     std::uint32_t rom_baud=2000000, requests=0, retries=0, stream_crc=0;
     std::uint32_t rom_window=1;
+    std::uint32_t rom_pipeline=0,cpu_pumps=0,cpu_prepared=0,cpu_acks=0,cpu_crc=0;
     std::uint64_t end_ack_us=0;
+    TcRomMeasureRecord profile[static_cast<unsigned>(TcRomMeasurePhase::Count)]{};
+    std::uint64_t profile_clock_calibration_us=0;
+    std::uint32_t profile_clock_reads=0,profile_error=0;
+    bool profile_enabled=false;
     bool active=false, success=false;
 };
 #ifdef TC_LAUNCH_TRACE

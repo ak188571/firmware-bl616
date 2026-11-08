@@ -11,6 +11,7 @@ bool tc_rom_uart_load_snes(FIL &file,std::uint32_t off,std::uint32_t bytes,const
 // The application owns the single RX ISR ring. Its ordinary parser pauses
 // while the ROM adapter is the consumer; interrupts remain enabled.
 int tc_rom_uart_rx_take(std::uint8_t *byte);
+bool tc_rom_uart_rx_pending();
 void tc_rom_uart_rx_flush();
 #else
 inline bool tc_rom_uart_owned(){return false;}

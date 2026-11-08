@@ -385,6 +385,7 @@ static int uart1_rx_take(uint8_t *byte,bool transfer=false)
 }
 #ifdef TC_ROM_UART
 int tc_rom_uart_rx_take(std::uint8_t *byte){return uart1_rx_take(byte,true);}
+bool tc_rom_uart_rx_pending(){return uart1_rx_overflow||uart1_rx_read!=uart1_rx_write;}
 void tc_rom_uart_rx_flush(){
     taskENTER_CRITICAL();uart1_rx_read=uart1_rx_write;uart1_rx_overflow=false;taskEXIT_CRITICAL();
 }

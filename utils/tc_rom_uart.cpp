@@ -2,6 +2,7 @@
 #ifdef TC_ROM_UART
 #include "tc_rom_protocol.h"
 #include "tc_launch_trace.h"
+#include "tc_rom_measure.h"
 #include "utils.h"
 #include <cstring>
 extern "C" {
@@ -29,7 +30,31 @@ static ATTR_NOCACHE_NOINIT_RAM_SECTION std::uint8_t frame_storage[2*TcRom::MaxFr
 static ATTR_NOCACHE_NOINIT_RAM_SECTION bflb_dma_channel_lli_pool_s lli[1] __attribute__((aligned(64)));
 bflb_device_s *dma=nullptr;
 std::uint32_t session_counter=0;
+std::uint8_t reply_window[25]{};
+unsigned reply_used=0;
+bool reply_counted=false,reply_first_poll=true;
+void reset_reply_parser(){reply_used=0;reply_counted=false;reply_first_poll=true;}
+bool poll_frame(void *,std::uint8_t *reply,std::size_t *reply_size){
+    if(*reply_size<25||!tc_rom_uart_rx_pending())return false;
+    TcRom::ProfileScope processing(tc_rom_measure_observer(),TcRom::Activity::AckProcess);
+    if(!reply_counted){tc_rom_measure_ack_begin();reply_counted=true;reply_first_poll=true;}
+    for(unsigned budget=0;budget<128;++budget){
+        std::uint8_t byte=0;const int got=tc_rom_uart_rx_take(&byte);
+        if(reply_first_poll||!got)tc_rom_measure_ack_poll(got,reply_first_poll);
+        reply_first_poll=false;
+        if(got<0){reply_used=0;continue;}if(!got)return false;
+        if(reply_used==sizeof reply_window){std::memmove(reply_window,reply_window+1,sizeof reply_window-1);--reply_used;}
+        reply_window[reply_used++]=byte;
+        TcRom::View answer;
+        if(reply_used==sizeof reply_window&&TcRom::decode(reply_window,sizeof reply_window,answer,tc_rom_measure_observer())&&answer.command==TcRom::Reply&&answer.count==1){
+            std::memcpy(reply,reply_window,sizeof reply_window);*reply_size=sizeof reply_window;
+            reset_reply_parser();return true;
+        }
+    }
+    return false;
+}
 bool drained(std::uint32_t timeout_ms=50){
+    TcRom::ProfileScope timing(tc_rom_measure_observer(),TcRom::Activity::TxDrain);
     const auto start=bflb_mtimer_get_time_ms();
     while(!bflb_uart_txempty(uart1_dev)||(getreg32(uart1_dev->reg_base+UART_STATUS_OFFSET)&UART_STS_UTX_BUS_BUSY))
         if(bflb_mtimer_get_time_ms()-start>=timeout_ms)return false;
@@ -39,7 +64,7 @@ bool set_rate(std::uint32_t baud){
     if((baud!=2000000&&baud!=8000000)||!drained())return false;
     bflb_uart_link_txdma(uart1_dev,false);
     if(bflb_uart_feature_control(uart1_dev,UART_CMD_SET_BAUD_RATE,baud)!=0)return false;
-    bflb_uart_feature_control(uart1_dev,UART_CMD_CLR_RX_FIFO,0);tc_rom_uart_rx_flush();return true;
+    bflb_uart_feature_control(uart1_dev,UART_CMD_CLR_RX_FIFO,0);tc_rom_uart_rx_flush();reset_reply_parser();return true;
 }
 bool prepare_dma(){
     if(!dma){
@@ -60,46 +85,54 @@ bool send_frame(void *,const std::uint8_t *request,std::size_t size,std::uint32_
     bflb_dma_channel_lli_transfer_s transfer{};
     transfer.src_addr=reinterpret_cast<std::uintptr_t>(request);transfer.dst_addr=DMA_ADDR_UART1_TDR;transfer.nbytes=size;
     const auto enqueue_start=tc_launch_clock();
+    TcRom::ProfileScope setup(tc_rom_measure_observer(),TcRom::Activity::TxSetup);
     bflb_dma_channel_tcint_clear(dma);
     if(bflb_dma_channel_lli_reload(dma,lli,1,&transfer,1)!=1)return false;
-    bflb_uart_link_txdma(uart1_dev,true);bflb_dma_channel_start(dma);
+    bflb_uart_link_txdma(uart1_dev,true);
+    tc_rom_measure_tx_begin(size);bflb_dma_channel_start(dma);setup.stop();
 #ifdef TC_LAUNCH_TRACE
     if(tc_launch_record.active)tc_launch_record.uart_enqueue_us+=tc_launch_clock()-enqueue_start;
 #else
     (void)enqueue_start;
 #endif
     const auto start=bflb_mtimer_get_time_ms();
-    if(pump)pump(pump_context);
-    while(bflb_dma_channel_isbusy(dma)&&bflb_mtimer_get_time_ms()-start<timeout){}
-    if(!bflb_dma_channel_isbusy(dma)&&drained())return true;
+    if(pump){TcRom::ProfileScope cpu(tc_rom_measure_observer(),TcRom::Activity::Cpu);pump(pump_context);}
+    {TcRom::ProfileScope timing(tc_rom_measure_observer(),TcRom::Activity::TxWait);
+    while(bflb_dma_channel_isbusy(dma)&&bflb_mtimer_get_time_ms()-start<timeout){
+#ifdef TC_ROM_CPU_PIPELINE
+        // RX is only a wake-up hint. The common pump owns CRC, credits and
+        // retry policy. No nested send or request-buffer reuse is permitted.
+        if(pump&&tc_rom_uart_rx_pending()){
+            TcRom::ProfileScope cpu(tc_rom_measure_observer(),TcRom::Activity::Cpu);pump(pump_context);
+        }
+#endif
+    }}
+    if(!bflb_dma_channel_isbusy(dma)&&drained()){tc_rom_measure_tx_end(true);return true;}
+    tc_rom_measure_tx_end(false);
     bflb_dma_channel_stop(dma);bflb_uart_link_txdma(uart1_dev,false);
     bflb_uart_feature_control(uart1_dev,UART_CMD_CLR_TX_FIFO,0);return false;
 }
 bool receive_frame(void *,std::uint8_t *reply,std::size_t *reply_size,std::uint32_t timeout){
+    TcRom::ProfileScope processing(tc_rom_measure_observer(),TcRom::Activity::AckProcess);
+    TcRom::ProfileScope waiting(tc_rom_measure_observer(),TcRom::Activity::AckWait,0,false);
     if(*reply_size<25)return false;
+    if(!reply_counted){tc_rom_measure_ack_begin();reply_counted=true;reply_first_poll=true;}
     const auto start=bflb_mtimer_get_time_ms();
-    std::uint8_t window[25]{};unsigned used=0;
     while(bflb_mtimer_get_time_ms()-start<timeout){
-        std::uint8_t byte=0;const int got=tc_rom_uart_rx_take(&byte);
-        if(got<0){used=0;continue;}if(!got)continue;
-        if(used==sizeof window){std::memmove(window,window+1,sizeof window-1);--used;}
-        window[used++]=byte;
-        TcRom::View answer;
-        if(used==sizeof window&&TcRom::decode(window,sizeof window,answer)&&answer.command==TcRom::Reply&&answer.count==1){
-            std::memcpy(reply,window,sizeof window);*reply_size=sizeof window;return true;
-        }
+        if(poll_frame(nullptr,reply,reply_size)){waiting.stop();return true;}
+        tc_rom_measure_ack_poll(0,reply_first_poll);reply_first_poll=false;waiting.start();
     }
     return false;
 }
 bool exchange(void *context,const std::uint8_t *request,std::size_t size,std::uint8_t *reply,std::size_t *reply_size,
               std::uint32_t timeout,void (*pump)(void *),void *pump_context){
-    tc_rom_uart_rx_flush();
+    tc_rom_uart_rx_flush();reset_reply_parser();
     if(!send_frame(context,request,size,timeout,pump,pump_context))return false;
     const auto start=bflb_mtimer_get_time_ms();
     while(bflb_mtimer_get_time_ms()-start<timeout){
         if(!receive_frame(context,reply,reply_size,timeout))return false;
         TcRom::View answer;
-        if(TcRom::decode(reply,*reply_size,answer)&&static_cast<std::uint8_t>(answer.op)==request[5]&&
+        if(TcRom::decode(reply,*reply_size,answer,tc_rom_measure_observer())&&static_cast<std::uint8_t>(answer.op)==request[5]&&
            answer.session==TcRom::get32(request+6)&&answer.sequence==TcRom::get32(request+10))return true;
     }
     return false;
@@ -115,7 +148,9 @@ struct Stream {
         if(failed||!remaining||ready[fill])return;
         const UINT wanted=remaining<sizeof source_buffers[0]?remaining:sizeof source_buffers[0];
         UINT got=0;const auto begin=tc_launch_clock();
-        const auto result=f_read(file,source_buffers[fill],wanted,&got);
+        FRESULT result;
+        {TcRom::ProfileScope timing(tc_rom_measure_observer(),TcRom::Activity::SdRead,wanted);
+        result=f_read(file,source_buffers[fill],wanted,&got);}
 #ifdef TC_LAUNCH_TRACE
         if(tc_launch_record.active)tc_launch_record.sd_read_us+=tc_launch_clock()-begin;
 #else
@@ -148,10 +183,15 @@ bool tc_rom_uart_load_snes(FIL &file,std::uint32_t off,std::uint32_t bytes,const
     Stream source;source.file=&file;source.remaining=bytes;std::memcpy(source.header,header,64);
     if(f_lseek(&file,off)!=FR_OK)return false;
     if(!acquire())return false;
-    tc_rom_uart_rx_flush();
+    tc_rom_uart_rx_flush();reset_reply_parser();
     auto id=static_cast<std::uint32_t>(bflb_mtimer_get_time_us())^(++session_counter*0x9e3779b9u);
     if(!id)id=1;
-    TcRom::Session session({nullptr,exchange,send_frame,receive_frame},id,frame_storage,sizeof frame_storage);
+#ifdef TC_ROM_CPU_PIPELINE
+    const auto poll=poll_frame;
+#else
+    decltype(&poll_frame) poll=nullptr;
+#endif
+    TcRom::Session session({nullptr,exchange,send_frame,receive_frame,tc_rom_measure_observer(),poll},id,frame_storage,sizeof frame_storage);
 #ifdef TC_LAUNCH_TRACE
     if(tc_launch_record.active)tc_launch_record.rom_baud=8000000;
 #endif
@@ -161,9 +201,12 @@ bool tc_rom_uart_load_snes(FIL &file,std::uint32_t off,std::uint32_t bytes,const
     if(success)success=session.link_rate(8000000);
     if(success){delay(6);success=set_rate(8000000)&&session.link_sync();}
     if(success)success=session.negotiate_window();
-    if(success)success=session.stream({&source,Stream::read,Stream::pump});
+    if(success){
+        tc_rom_measure_prepare();tc_rom_measure_begin(TcRomMeasurePhase::Data);
+        success=session.stream({&source,Stream::read,Stream::pump});tc_rom_measure_end();
+    }
     if(success)tc_launch_mark(TcLaunchEvent::RomQueued);
-    if(success){end_started=true;success=session.finish();}
+    if(success){end_started=true;tc_rom_measure_begin(TcRomMeasurePhase::End);success=session.finish();tc_rom_measure_end();}
 #ifdef TC_LAUNCH_TRACE
     if(success&&tc_launch_record.active)tc_launch_record.end_ack_us=tc_launch_clock()-tc_launch_record.origin_us;
 #endif
@@ -177,6 +220,11 @@ bool tc_rom_uart_load_snes(FIL &file,std::uint32_t off,std::uint32_t bytes,const
         tc_launch_record.requests=session.stats().requests;tc_launch_record.retries=session.stats().retries;
         tc_launch_record.stream_crc=session.stats().crc;
         tc_launch_record.rom_window=session.stats().window;
+        tc_launch_record.rom_pipeline=session.stats().pipeline;
+        tc_launch_record.cpu_pumps=session.stats().pumps;
+        tc_launch_record.cpu_prepared=session.stats().prepared_in_send;
+        tc_launch_record.cpu_acks=session.stats().acks_in_send;
+        tc_launch_record.cpu_crc=session.stats().crc_in_send;
     }
 #endif
     bflb_dma_channel_stop(dma);bflb_uart_link_txdma(uart1_dev,false);

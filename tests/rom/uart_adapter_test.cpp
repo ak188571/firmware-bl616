@@ -12,6 +12,7 @@ extern "C" {
 #include <cstring>
 #include <deque>
 #include <set>
+#include <map>
 #include <vector>
 using namespace TcRom;
 extern "C" int __wrap_bflb_uart_put(bflb_device_s *,std::uint8_t *,std::uint32_t);
@@ -30,6 +31,15 @@ static bool irq_enabled=true;
 static bool delay_dma=false,stuck_dma=false,channel_active=false;
 static bool old_core=false,window_silent=false;
 static unsigned busy_polls=0,busy_events=0;
+static std::vector<std::uint8_t> dma_snapshot;
+struct Pending {std::uint32_t due;std::vector<std::uint8_t> bytes;};
+static std::vector<Pending> pending;
+static bool delayed_ack=false,split_ack=false,out_of_order=false,lose_all_data=false;
+static std::map<unsigned,unsigned> data_attempts;
+static void deliver(){
+    for(auto it=pending.begin();it!=pending.end();){if(it->due<=ticks){rx.insert(rx.end(),it->bytes.begin(),it->bytes.end());it=pending.erase(it);}else ++it;}
+}
+static void pinned_unchanged(){if(channel_active)assert(std::memcmp(reinterpret_cast<const void*>(transfer.src_addr),dma_snapshot.data(),dma_snapshot.size())==0);}
 extern "C" std::uintptr_t bflb_irq_save(){const auto old=irq_enabled;irq_enabled=false;return old;}
 extern "C" void bflb_irq_restore(std::uintptr_t old){irq_enabled=old;}
 extern "C" void mock_enter(){assert(!critical);++critical;}
@@ -51,6 +61,8 @@ extern "C" std::uint32_t getreg32(std::uintptr_t){return 0;}
 extern "C" int __real_bflb_uart_put(bflb_device_s *,std::uint8_t *,std::uint32_t n){assert(!critical);++real_puts;return n;}
 extern "C" int __real_bflb_uart_putchar(bflb_device_s *,int){assert(!critical);++real_puts;return 0;}
 extern "C" bool bflb_dma_channel_isbusy(bflb_device_s *){
+    pinned_unchanged();
+    deliver();
     if(stuck_dma&&channel_active)return true;
     if(busy_polls){--busy_polls;++busy_events;return true;}
     channel_active=false;return false;
@@ -63,8 +75,10 @@ extern "C" int bflb_dma_channel_lli_reload(bflb_device_s *,bflb_dma_channel_lli_
 }
 extern "C" void bflb_dma_channel_start(bflb_device_s *){
     assert(tc_rom_uart_owned()&&!critical);pumping=true;channel_active=true;
-    if(delay_dma)busy_polls=3; // Matching ACK is already queued while DMA is busy.
+    if(delay_dma)busy_polls=12;
     const auto *wire=reinterpret_cast<const std::uint8_t*>(transfer.src_addr);
+    dma_snapshot.assign(wire,wire+transfer.nbytes);
+    if(wire[5]==2)assert(++data_attempts[get32(wire+10)]<=4);
     std::vector<std::uint8_t> frame(wire,wire+transfer.nbytes);View f;
     if(damage&&wire[5]==2){frame[20]^=1;damage=false;}
     if(!decode(frame.data(),frame.size(),f))return;
@@ -86,11 +100,18 @@ extern "C" void bflb_dma_channel_start(bflb_device_s *){
     auto n=encode(reply.data(),reply.size(),{Reply,f.op,f.session,f.sequence,f.op==Op::Data&&status==0?f.offset+f.count:std::uint32_t(committed.size()),&status,1});assert(n==25);
     if(all_lost)return;
     if(lose&&f.op==Op::Data){lose=false;return;}
-    rx.insert(rx.end(),reply.begin(),reply.end());
+    if(lose_all_data&&f.op==Op::Data)return;
+    if((delayed_ack||out_of_order)&&f.op==Op::Data){
+        const auto wait=out_of_order&&f.sequence==0?30u:out_of_order?2u:16u;
+        const unsigned first=split_ack?7:25;
+        pending.push_back({ticks+wait,std::vector<std::uint8_t>(reply.begin(),reply.begin()+first)});
+        if(split_ack)pending.push_back({ticks+wait+3,std::vector<std::uint8_t>(reply.begin()+first,reply.end())});
+    }else rx.insert(rx.end(),reply.begin(),reply.end());
 }
-extern "C" void bflb_dma_channel_stop(bflb_device_s *){pumping=false;busy_polls=0;channel_active=false;}
+extern "C" void bflb_dma_channel_stop(bflb_device_s *){pinned_unchanged();pumping=false;busy_polls=0;channel_active=false;}
 void tc_rom_uart_rx_flush(){rx.clear();}
-int tc_rom_uart_rx_take(std::uint8_t *b){pumping=false;if(rx.empty())return 0;*b=rx.front();rx.pop_front();return 1;}
+bool tc_rom_uart_rx_pending(){pinned_unchanged();deliver();return !rx.empty();}
+int tc_rom_uart_rx_take(std::uint8_t *b){pinned_unchanged();deliver();if(rx.empty())return 0;*b=rx.front();rx.pop_front();return 1;}
 extern "C" FRESULT f_lseek(FIL *file,FSIZE_t at){file->position=at;return at>input.size()?FR_DISK_ERR:FR_OK;}
 extern "C" FRESULT f_read(FIL *file,void *buffer,UINT n,UINT *got){
     assert(pumping&&tc_rom_uart_owned()&&!critical&&n<=4096);buffers.insert(buffer);*got=0;
@@ -110,6 +131,7 @@ static void reset(unsigned bytes,unsigned prefix){
     pumping=verified=running=aborted=fail_dma=lose=damage=all_lost=false;fail_read=short_read=~0u;
     delay_dma=stuck_dma=channel_active=false;busy_polls=busy_events=0;
     old_core=window_silent=false;
+    delayed_ack=split_ack=out_of_order=lose_all_data=false;pending.clear();data_attempts.clear();
     tc_rom_uart_capabilities(true,true);assert(tc_rom_uart_capable()&&!tc_rom_uart_owned());
     tc_launch_begin();
 }
@@ -125,14 +147,32 @@ int main(){
 #ifdef TC_LAUNCH_TRACE
         assert(tc_launch_record.rom_baud==8000000&&tc_launch_record.retries>=2&&tc_launch_record.rom_bytes==bytes);
         assert(tc_launch_record.end_ack_us>0&&tc_launch_record.stream_crc==(stream_crc^0xffffffffu));
+        assert(tc_launch_record.rom_pipeline==1&&tc_launch_record.cpu_pumps>0&&tc_launch_record.cpu_prepared>0);
+#ifdef TC_ROM_PROFILE
+        assert(tc_launch_record.profile_enabled&&!tc_launch_record.profile_error);
+        const auto &p=tc_launch_record.profile[0];std::uint64_t sum=0;for(auto n:p.us)sum+=n;
+        assert(sum==p.elapsed_us&&p.tx_frames&&p.tx_bytes&&p.ack_calls);
+        assert(p.units[static_cast<unsigned>(Activity::StreamCrc)]==bytes+64);
+#endif
 #endif
     }
     reset(8192,0);delay_dma=true;FIL delayed{0,input.size()};
     assert(tc_rom_uart_load_snes(delayed,0,8192,header)&&running&&busy_events>0&&!busy_polls);
+    for(unsigned mode=0;mode<3;++mode){
+        reset(16384,0);delay_dma=true;delayed_ack=true;split_ack=mode!=0;out_of_order=mode==2;
+        FIL file{0,input.size()};assert(tc_rom_uart_load_snes(file,0,16384,header)&&running&&committed.size()==16448);
+#ifdef TC_LAUNCH_TRACE
+        assert(tc_launch_record.cpu_prepared>0&&tc_launch_record.cpu_acks>0&&tc_launch_record.cpu_crc>0);
+#endif
+    }
+    reset(16384,0);lose_all_data=true;FIL lost{0,input.size()};
+    assert(!tc_rom_uart_load_snes(lost,0,16384,header)&&!running&&data_attempts.size()==2);
+    for(auto row:data_attempts)assert(row.second==4);
     reset(8192,0);old_core=true;FIL legacy{0,input.size()};
     assert(tc_rom_uart_load_snes(legacy,0,8192,header)&&running&&committed.size()==8256);
 #ifdef TC_LAUNCH_TRACE
     assert(tc_launch_record.rom_window==1);
+    assert(tc_launch_record.rom_pipeline==0);
 #endif
     reset(8192,0);window_silent=true;FIL silent{0,input.size()};
     assert(!tc_rom_uart_load_snes(silent,0,8192,header)&&!running&&committed.empty());

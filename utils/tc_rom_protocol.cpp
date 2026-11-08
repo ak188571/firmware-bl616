@@ -21,7 +21,7 @@ std::uint32_t crc_update(std::uint32_t state,const void *data,std::size_t size){
 }
 std::uint32_t get32(const std::uint8_t *p){return (std::uint32_t(p[0])<<24)|(std::uint32_t(p[1])<<16)|(std::uint32_t(p[2])<<8)|p[3];}
 void put32(std::uint8_t *p,std::uint32_t v){for(unsigned i=0;i<4;++i)p[i]=static_cast<std::uint8_t>(v>>(24-8*i));}
-std::size_t encode(std::uint8_t *out,std::size_t capacity,const View &f){
+std::size_t encode(std::uint8_t *out,std::size_t capacity,const View &f,Profile *profile){
     if(!out||!f.session||f.count>MaxData||capacity<Overhead+f.count||(!f.data&&f.count)||
        (f.command!=Request&&f.command!=Reply))return 0;
     // Source may already occupy out+20; move it before writing the header.
@@ -31,15 +31,17 @@ std::size_t encode(std::uint8_t *out,std::size_t capacity,const View &f){
     out[3]=f.command;out[4]=Version;out[5]=static_cast<std::uint8_t>(f.op);
     put32(out+6,f.session);put32(out+10,f.sequence);put32(out+14,f.offset);
     out[18]=static_cast<std::uint8_t>(f.count>>8);out[19]=static_cast<std::uint8_t>(f.count);
-    put32(out+20+f.count,crc_update(0xffffffffu,out,20+f.count)^0xffffffffu);
+    {ProfileScope timing(profile,Activity::FrameCrc,20+f.count);
+    put32(out+20+f.count,crc_update(0xffffffffu,out,20+f.count)^0xffffffffu);}
     return Overhead+f.count;
 }
-bool decode(const std::uint8_t *p,std::size_t size,View &f){
+bool decode(const std::uint8_t *p,std::size_t size,View &f,Profile *profile){
     if(!p||size<Overhead||size>MaxFrame||p[0]!=0xaa||p[4]!=Version||
        (p[3]!=Request&&p[3]!=Reply))return false;
     const auto count=static_cast<std::uint16_t>((unsigned(p[18])<<8)|p[19]);
-    if(size!=Overhead+count||count>MaxData||((unsigned(p[1])<<8)|p[2])!=size-3||!get32(p+6)||
-       get32(p+size-4)!=(crc_update(0xffffffffu,p,size-4)^0xffffffffu))return false;
+    if(size!=Overhead+count||count>MaxData||((unsigned(p[1])<<8)|p[2])!=size-3||!get32(p+6))return false;
+    {ProfileScope timing(profile,Activity::ReplyCrc,size-4);
+    if(get32(p+size-4)!=(crc_update(0xffffffffu,p,size-4)^0xffffffffu))return false;}
     f={p[3],static_cast<Op>(p[5]),get32(p+6),get32(p+10),get32(p+14),p+20,count};return true;
 }
 bool Session::request(Op op,const std::uint8_t *data,std::uint16_t count,std::uint32_t timeout,
@@ -47,7 +49,7 @@ bool Session::request(Op op,const std::uint8_t *data,std::uint16_t count,std::ui
     last_status_=Status::Busy;
     if(!transport_.exchange||!id_)return false;
     const auto seq=op==Op::Abort?0:sequence_,at=op==Op::Abort?0:offset_;
-    const auto size=encode(storage_,capacity_,{Request,op,id_,seq,at,data,count});
+    const auto size=encode(storage_,capacity_,{Request,op,id_,seq,at,data,count},transport_.profile);
     if(!size)return false;
     const auto expected=offset_+(op==Op::Data?count:0);
     for(unsigned attempt=0;attempt<4;++attempt){
@@ -55,7 +57,7 @@ bool Session::request(Op op,const std::uint8_t *data,std::uint16_t count,std::ui
         std::uint8_t reply[Overhead+1]{};std::size_t reply_size=sizeof reply;
         if(!transport_.exchange(transport_.context,storage_,size,reply,&reply_size,timeout,pump,context))continue;
         View answer;
-        if(!decode(reply,reply_size,answer)||answer.command!=Reply||answer.op!=op||answer.session!=id_||
+        if(!decode(reply,reply_size,answer,transport_.profile)||answer.command!=Reply||answer.op!=op||answer.session!=id_||
            answer.sequence!=seq||answer.count!=1)continue;
         const auto status=static_cast<Status>(answer.data[0]);last_status_=status;
         if(status==Status::Ok&&(any_offset||answer.offset==expected))return true;
@@ -74,9 +76,11 @@ bool Session::stream(Source source){
     while(offset_<total_){
         std::uint16_t n=0;
         const auto wanted=static_cast<std::uint16_t>(total_-offset_<MaxData?total_-offset_:MaxData);
-        if(!source.read(source.context,offset_,storage_+20,wanted,&n)||!n||n>wanted)return false;
+        {ProfileScope timing(transport_.profile,Activity::SourceCopy);
+        if(!source.read(source.context,offset_,storage_+20,wanted,&n)||!n||n>wanted)return false;}
         if(!request(Op::Data,storage_+20,n,50,source.pump,source.context))return false;
-        crc_=crc_update(crc_,storage_+20,n);offset_+=n;++sequence_;++stats_.blocks;stats_.bytes+=n;
+        {ProfileScope timing(transport_.profile,Activity::StreamCrc,n);crc_=crc_update(crc_,storage_+20,n);}
+        offset_+=n;++sequence_;++stats_.blocks;stats_.bytes+=n;
     }
     stats_.crc=crc_^0xffffffffu;return true;
 }
@@ -109,6 +113,7 @@ bool Session::negotiate_window(){
     return window_two_||last_status_==Status::Format;
 }
 bool Session::stream_window(Source source){
+    if(transport_.poll)return stream_pipeline(source);
     struct Slot {std::uint32_t seq=0,at=0;std::uint16_t n=0;unsigned attempts=0;bool ack=false;};
     Slot slots[2];unsigned head=0,used=0;
     auto queued=offset_;auto seq=sequence_;
@@ -125,14 +130,15 @@ bool Session::stream_window(Source source){
             const auto i=(head+used)%2;auto &s=slots[i];s={};s.seq=seq;s.at=queued;
             const auto wanted=static_cast<std::uint16_t>(total_-queued<MaxData?total_-queued:MaxData);
             auto *frame=storage_+i*MaxFrame;
-            if(!source.read(source.context,queued,frame+20,wanted,&s.n)||!s.n||s.n>wanted)return false;
-            if(!encode(frame,MaxFrame,{Request,Op::Data,id_,seq,queued,frame+20,s.n}))return false;
+            {ProfileScope timing(transport_.profile,Activity::SourceCopy);
+            if(!source.read(source.context,queued,frame+20,wanted,&s.n)||!s.n||s.n>wanted)return false;}
+            if(!encode(frame,MaxFrame,{Request,Op::Data,id_,seq,queued,frame+20,s.n},transport_.profile))return false;
             queued+=s.n;++seq;++used;
             if(!send(i)){recovery=true;break;}
         }
         std::uint8_t reply[Overhead+1];std::size_t size=sizeof reply;View answer;
         bool retry=!transport_.receive(transport_.context,reply,&size,50);
-        if(!retry&&decode(reply,size,answer)&&answer.command==Reply&&answer.op==Op::Data&&answer.session==id_&&answer.count==1){
+        if(!retry&&decode(reply,size,answer,transport_.profile)&&answer.command==Reply&&answer.op==Op::Data&&answer.session==id_&&answer.count==1){
             for(unsigned k=0;k<used;++k){
                 auto &s=slots[(head+k)%2];if(answer.sequence!=s.seq)continue;
                 const auto status=static_cast<Status>(answer.data[0]);
@@ -147,7 +153,8 @@ bool Session::stream_window(Source source){
         // Only contiguous ACKs release window credits. An ACK for the second
         // slot cannot evict the first from the receiver's two-entry history.
         while(used&&slots[head].ack){
-            const auto &s=slots[head];crc_=crc_update(crc_,storage_+head*MaxFrame+20,s.n);
+            const auto &s=slots[head];
+            {ProfileScope timing(transport_.profile,Activity::StreamCrc,s.n);crc_=crc_update(crc_,storage_+head*MaxFrame+20,s.n);}
             offset_+=s.n;++sequence_;++stats_.blocks;stats_.bytes+=s.n;
             head^=1;--used;
         }
@@ -162,4 +169,141 @@ bool Session::stream_window(Source source){
     }
     stats_.crc=crc_^0xffffffffu;return true;
 }
+}
+
+namespace TcRom {
+// Two allocated slots bound both wire credit and retained retry history.
+// Prepared is not Sent. A speculative digest is never the committed digest.
+struct Session::Pipeline {
+    enum State {Empty,Prepared,Sent};
+    struct Slot {
+        State state=Empty;
+        std::uint32_t seq=0,at=0,after=0;
+        std::uint16_t n=0;
+        unsigned attempts=0;
+        bool ack=false,digest=false;
+    } slots[2];
+    Session &s;Source source;
+    unsigned head=0,used=0;
+    std::uint32_t queued,seq;
+    int pinned=-1;
+    bool fatal=false,recovery=false,retrying=false,in_pump=false;
+    Pipeline(Session &session,Source input):s(session),source(input),queued(s.offset_),seq(s.sequence_){}
+    std::uint8_t *frame(unsigned i){return s.storage_+i*MaxFrame;}
+    bool unacked()const{
+        for(const auto &slot:slots)if(slot.state==Sent&&!slot.ack)return true;
+        return false;
+    }
+    void digests(){
+        auto crc=s.crc_;
+        for(unsigned k=0;k<used;++k){
+            const unsigned i=(head+k)%2;auto &slot=slots[i];
+            if(!slot.digest){
+                ProfileScope timing(s.transport_.profile,Activity::StreamCrc,slot.n);
+                slot.after=crc_update(crc,frame(i)+20,slot.n);slot.digest=true;
+                if(pinned>=0)++s.stats_.crc_in_send;
+            }
+            crc=slot.after;
+        }
+    }
+    void commit(){
+        // Even an early ACK cannot release the DMA/physical transmitter's slot.
+        while(used&&slots[head].state==Sent&&slots[head].ack&&slots[head].digest&&int(head)!=pinned){
+            const auto &slot=slots[head];s.crc_=slot.after;s.offset_+=slot.n;
+            ++s.sequence_;++s.stats_.blocks;s.stats_.bytes+=slot.n;
+            slots[head]={};head^=1;--used;
+        }
+        if(!unacked())recovery=false;
+    }
+    void reply(const std::uint8_t *wire,std::size_t n){
+        View answer;
+        if(!decode(wire,n,answer,s.transport_.profile)||answer.command!=Reply||answer.op!=Op::Data||answer.session!=s.id_||answer.count!=1)return;
+        for(unsigned k=0;k<used;++k){
+            auto &slot=slots[(head+k)%2];
+            if(slot.state!=Sent||answer.sequence!=slot.seq)continue;
+            const auto status=static_cast<Status>(answer.data[0]);
+            if(status==Status::Ok&&answer.offset==slot.at+slot.n){
+                if(!slot.ack&&pinned>=0)++s.stats_.acks_in_send;
+                slot.ack=true;
+            }else if(status==Status::Busy||status==Status::Order)recovery=true;
+            else if(status!=Status::Ok)fatal=true;
+            return;
+        }
+    }
+    void drain(){
+        // At most two wire requests exist; cap work even for an abusive peer.
+        for(unsigned count=0;count<4&&unacked();++count){
+            std::uint8_t bytes[Overhead+1];std::size_t n=sizeof bytes;
+            if(!s.transport_.poll(s.transport_.context,bytes,&n))break;
+            reply(bytes,n);
+        }
+    }
+    bool prepare(){
+        if(fatal||recovery||retrying||used==2||queued==s.total_)return false;
+        const unsigned i=(head+used)%2;auto &slot=slots[i];
+        // Only Empty can be written, never the pinned or retained Sent slot.
+        if(slot.state!=Empty||int(i)==pinned){fatal=true;return false;}
+        const auto wanted=static_cast<std::uint16_t>(s.total_-queued<MaxData?s.total_-queued:MaxData);
+        std::uint16_t n=0;
+        {ProfileScope timing(s.transport_.profile,Activity::SourceCopy);
+        if(!source.read(source.context,queued,frame(i)+20,wanted,&n)||!n||n>wanted){fatal=true;return false;}}
+        if(!encode(frame(i),MaxFrame,{Request,Op::Data,s.id_,seq,queued,frame(i)+20,n},s.transport_.profile)){fatal=true;return false;}
+        slot={};slot.state=Prepared;slot.at=queued;slot.seq=seq;slot.n=n;
+        queued+=n;++seq;++used;if(pinned>=0)++s.stats_.prepared_in_send;
+        return true;
+    }
+    static void pump(void *context){static_cast<Pipeline*>(context)->tick();}
+    void tick(){
+        if(in_pump||fatal)return;
+        in_pump=true;++s.stats_.pumps;
+        drain();digests();commit();
+        if(!fatal&&!recovery&&!retrying){
+            if(source.pump)source.pump(source.context);
+            drain();digests();commit();
+            while(prepare()){}
+            digests();
+            if(source.pump)source.pump(source.context);
+            drain();commit();
+        }
+        in_pump=false;
+    }
+    bool send(unsigned i){
+        auto &slot=slots[i];if(slot.attempts==4){fatal=true;return false;}
+        ++s.stats_.requests;if(slot.attempts++)++s.stats_.retries;
+        slot.state=Sent;pinned=int(i);
+        const bool ok=s.transport_.send(s.transport_.context,frame(i),Overhead+slot.n,50,pump,this);
+        pinned=-1;if(!ok)recovery=true;
+        digests();commit();return ok;
+    }
+    bool run(){
+        s.stats_.pipeline=1;
+        if(!prepare())return false; // The UART source's first block is its header.
+        while(s.offset_<s.total_){
+            if(fatal)return false;
+            drain();digests();commit();
+            if(fatal)return false;
+            int ready=-1;
+            if(!recovery){
+                for(unsigned k=0;k<used;++k){const unsigned i=(head+k)%2;if(slots[i].state==Prepared){ready=int(i);break;}}
+                if(ready<0&&prepare()){digests();ready=int((head+used-1)%2);}
+            }
+            if(ready>=0){send(unsigned(ready));continue;}
+            if(s.offset_==s.total_)break;
+            std::uint8_t bytes[Overhead+1];std::size_t n=sizeof bytes;
+            if(s.transport_.receive(s.transport_.context,bytes,&n,50)){
+                reply(bytes,n);digests();commit();continue;
+            }
+            // Drain first, then retry oldest unacknowledged Sent slots. Never
+            // recycle slots or prepare new data while this snapshot is in use.
+            unsigned retry[2],count=0;
+            for(unsigned k=0;k<used;++k){const unsigned i=(head+k)%2;if(slots[i].state==Sent&&!slots[i].ack)retry[count++]=i;}
+            if(!count){recovery=false;continue;}
+            recovery=false;retrying=true;
+            for(unsigned k=0;k<count&&!fatal;++k){const unsigned i=retry[k];if(slots[i].state==Sent&&!slots[i].ack)send(i);}
+            retrying=false;
+        }
+        s.stats_.crc=s.crc_^0xffffffffu;return !fatal;
+    }
+};
+bool Session::stream_pipeline(Source source){Pipeline pipeline(*this,source);return pipeline.run();}
 }

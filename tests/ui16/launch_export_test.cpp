@@ -54,5 +54,20 @@ int main(){
     assert(files[path].find("TC_ROMXFR1_TRACE_V2\ncore=2\nbaud=8000000\n")==0);
     assert(files[path].find("window=2\n")!=std::string::npos);
     assert(files[path].find("stream_boundary=DATA_ACK\nrequests=2057\nretries=2\nstream_crc=12345678\nEndAck_us=3000000\n")!=std::string::npos);
+    tc_launch_record.profile_enabled=true;tc_launch_record.profile_error=0;
+    tc_launch_record.profile[0].elapsed_us=11;tc_launch_record.profile[0].us[0]=11;
+    tc_launch_record.profile[1].elapsed_us=2;tc_launch_record.profile[1].us[10]=2;
+    const std::string long_path="sd:"+std::string(508,'x');
+    assert(tc_launch_export(long_path.c_str(),2,file,buffer,sizeof(buffer),path,sizeof(path)));
+    assert(files[path].find("TC_ROMXFR1_PROFILE_V3\n")==0);
+    assert(files[path].find("profile_error=0\n")!=std::string::npos);
+    assert(files[path].find("D_wall_us=11\nD_cpu_us=11\n")!=std::string::npos);
+    assert(files[path].find("E_ack_wait_us=2\n")!=std::string::npos);
+    assert(files[path].size()<sizeof(buffer)&&files[path].substr(files[path].size()-6)=="END=1\n");
+    tc_launch_record.profile_enabled=false;tc_launch_record.rom_pipeline=1;
+    tc_launch_record.cpu_pumps=10;tc_launch_record.cpu_prepared=8;tc_launch_record.cpu_acks=8;tc_launch_record.cpu_crc=9;
+    assert(tc_launch_export("sd:snes/fast.sfc",2,file,buffer,sizeof(buffer),path,sizeof(path)));
+    assert(files[path].find("TC_ROMXFR1_TRACE_V4\n")==0);
+    assert(files[path].find("cpu_pipeline=1\ncpu_pumps=10\ncpu_prepared=8\ncpu_acks=8\ncpu_crc=9\n")!=std::string::npos);
     std::puts("Trace export: post-measurement guard, exclusive new files, exact metadata, short write/sync/close/open errors passed");
 }

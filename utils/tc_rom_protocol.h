@@ -1,6 +1,7 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include "tc_rom_profile.h"
 
 // Transport-independent ROM transaction. UART and a future SPI adapter exchange
 // the same checksummed messages; neither the codec nor Session knows baud/pins.
@@ -19,8 +20,8 @@ struct View {
 std::uint32_t crc_update(std::uint32_t state,const void *data,std::size_t size);
 std::uint32_t get32(const std::uint8_t *p);
 void put32(std::uint8_t *p,std::uint32_t value);
-std::size_t encode(std::uint8_t *out,std::size_t capacity,const View &frame);
-bool decode(const std::uint8_t *bytes,std::size_t length,View &frame);
+std::size_t encode(std::uint8_t *out,std::size_t capacity,const View &frame,Profile *profile=nullptr);
+bool decode(const std::uint8_t *bytes,std::size_t length,View &frame,Profile *profile=nullptr);
 struct Transport {
     void *context=nullptr;
     // The caller owns request storage until this returns. A pump may prepare
@@ -32,13 +33,22 @@ struct Transport {
     bool (*send)(void *,const std::uint8_t *,std::size_t,std::uint32_t,
                  void (*pump)(void *),void *)=nullptr;
     bool (*receive)(void *,std::uint8_t *,std::size_t *,std::uint32_t)=nullptr;
+    Profile *profile=nullptr;
+    // Optional nonblocking reply collection, including partial-frame retention.
+    // May run inside send's pump; never flushes or sends another request.
+    // send invokes its pump after starting and again on RX/progress events,
+    // retaining the request bytes until all DMA/physical access has stopped.
+    bool (*poll)(void *,std::uint8_t *,std::size_t *)=nullptr;
 };
 struct Source {
     void *context=nullptr;
     bool (*read)(void *,std::uint32_t,std::uint8_t *,std::uint16_t,std::uint16_t *)=nullptr;
     void (*pump)(void *)=nullptr;
 };
-struct Stats {std::uint32_t requests=0,retries=0,blocks=0,bytes=0,crc=0,window=1;};
+struct Stats {
+    std::uint32_t requests=0,retries=0,blocks=0,bytes=0,crc=0,window=1;
+    std::uint32_t pipeline=0,pumps=0,prepared_in_send=0,acks_in_send=0,crc_in_send=0;
+};
 class Session {
 public:
     Session(Transport transport,std::uint32_t id,std::uint8_t *storage,std::size_t capacity):
@@ -56,6 +66,8 @@ private:
     bool request(Op,const std::uint8_t *,std::uint16_t,std::uint32_t timeout=50,
                  void (*pump)(void *)=nullptr,void *pump_context=nullptr,bool any_offset=false);
     bool stream_window(Source);
+    struct Pipeline;
+    bool stream_pipeline(Source);
     Status last_status_=Status::Busy;
     bool window_two_=false;
     Transport transport_;
