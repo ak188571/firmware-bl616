@@ -71,6 +71,10 @@ bool tc_launch_export(const char *rom,int core_id,FIL &file,void *buffer,UINT ca
         }
     }
     if(record.spi_hz)text.add("physical_transport=SPI_MODE1_DMA\nspi_hz=%lu\n",static_cast<unsigned long>(record.spi_hz));
+#ifdef TC_JTAG_SPI_HZ
+    text.add("jtag_transport=SPI0_MODE3_DMA_GPIO_TAIL\njtag_hz=%lu\n",
+        static_cast<unsigned long>(tc_jtag_spi_hz));
+#endif
     const char *const steps[]={"program","reload","boot_wait","snapshot","file_prepare",
         "erase_first","erase_second","write_begin","stream","sd_read","jtag_shift","write_end",
         "wait_core","rom_identity","settings","input_release","font_reset","redraw"};
@@ -78,6 +82,16 @@ bool tc_launch_export(const char *rom,int core_id,FIL &file,void *buffer,UINT ca
     for(unsigned phase=0;phase<2;++phase){
         const auto &transition=tc_transition_records[phase];
         const char prefix=phase==0?'L':'R';
+#ifdef TC_JTAG_SPI_HZ
+        const auto &jtag=transition.jtag_spi;
+        text.add("%c_jtag_attempts=%u\n%c_jtag_first_error=%u\n%c_jtag_error=%u\n",prefix,
+            transition.jtag_spi_attempts,prefix,transition.jtag_spi_first_error,prefix,unsigned(jtag.error));
+        text.add("%c_jtag_dma_bytes=%lu\n%c_jtag_dma_blocks=%lu\n%c_jtag_gpio_bytes=%lu\n",prefix,
+            static_cast<unsigned long>(jtag.dma_bytes),prefix,static_cast<unsigned long>(jtag.dma_blocks),
+            prefix,static_cast<unsigned long>(jtag.gpio_bytes));
+        text.add("%c_jtag_config=%08lx\n%c_jtag_period=%08lx\n",prefix,
+            static_cast<unsigned long>(jtag.config),prefix,static_cast<unsigned long>(jtag.period));
+#endif
         const auto &boot=transition.boot;
         const auto &attempt=transition.short_boot;
         if (attempt.attempted) {

@@ -21,6 +21,9 @@
 #include "utils.h"
 #include "overlay.h"
 #include "tc_transition_trace.h"
+#ifdef TC_JTAG_SPI_HZ
+#include "tc_jtag_spi.h"
+#endif
 
 #define JTAG_MAX_CHAIN 8
 
@@ -1000,10 +1003,12 @@ static bool program_image(const char *fname
 #endif
 ) {
     TcTransitionSection measured_program(TcTransitionStep::Program);
+#if defined(TC_LAUNCH_TRACE) || !defined(TC_JTAG_SPI_HZ)
     uint64_t writetdi_time_start;
     uint64_t time_total = bflb_mtimer_get_time_us();
-    UINT bytes = 0, total = 0;
     uint64_t time_jtag = 0, time_flash = 0;
+#endif
+    UINT bytes = 0, total = 0;
 
     // FRESULT res_sd = f_mount(&fs_usb, "usb:", 1);
     // if (res_sd != FR_OK) {
@@ -1020,6 +1025,10 @@ static bool program_image(const char *fname
         return false;
     }
     bool res = false;
+#ifdef TC_JTAG_SPI_HZ
+    bool spi_attempted=false;
+    bool stream_ok=true;
+#endif
 
 	enable_jtag_pins();
 
@@ -1033,6 +1042,12 @@ static bool program_image(const char *fname
     }
 
 #ifdef TANG_CONSOLE138K
+#ifdef TC_JTAG_SPI_HZ
+    // Preflight SPI/DMA without changing the JTAG pins, before the existing
+    // identity recheck and both SRAM erases. Never silently fall back to GPIO.
+    spi_attempted=true;
+    if(!tc_jtag_spi_prepare())goto load_core_close;
+#endif
     // Recheck after opening the file and reacquiring JTAG, before the first erase.
     if (chain_len != 1) goto load_core_close;
     {
@@ -1070,34 +1085,71 @@ static bool program_image(const char *fname
         goto load_core_close;
     }
 
+#if defined(TC_LAUNCH_TRACE) || !defined(TC_JTAG_SPI_HZ)
     extern uint64_t jtag_writetdi_time;
     writetdi_time_start = jtag_writetdi_time;
+#endif
     taskENTER_CRITICAL();
     {
     TcTransitionSection measured_stream(TcTransitionStep::Stream);
+#ifndef TC_JTAG_SPI_HZ
     jtag_enter_gpio_out_mode();
+#endif
     while (total < static_cast<UINT>(len)) {
         const UINT left = static_cast<UINT>(len) - total;
         const UINT want = left < BLOCK_SIZE ? left : BLOCK_SIZE;
         if (tc_transition_call(TcTransitionStep::SdRead,[&](){return f_read(&fcore, fbuf, want, &bytes);}) != FR_OK || bytes != want) break;
+#ifdef TC_JTAG_SPI_HZ
+        const bool last=total+bytes==static_cast<UINT>(len);
+        stream_ok=tc_transition_call(TcTransitionStep::JtagShift,[&](){return tc_jtag_spi_send(fbuf,bytes,last);});
+        if(!stream_ok)break;
+        total+=bytes;
+        _curr_tdi=fbuf[bytes-1]&1;
+        _curr_tms=last;
+        if(last)_state=EXIT1_DR; // Final TMS=1 was clocked by the GPIO tail.
+#else
         total += bytes;
         tc_transition_call(TcTransitionStep::JtagShift,[&](){jtag_writeTDI_msb_first_gpio_out_mode(fbuf, bytes, total == static_cast<UINT>(len));});
+#endif
     }
+#ifdef TC_JTAG_SPI_HZ
+    if(!tc_jtag_spi_close())stream_ok=false;
+#else
     jtag_exit_gpio_out_mode();
+#endif
     }
     taskEXIT_CRITICAL();
+#ifdef TC_JTAG_SPI_HZ
+    if(!stream_ok)goto load_core_close;
+#endif
     if (total != static_cast<UINT>(len) || !tc_transition_call(TcTransitionStep::WriteEnd,[](){return writeSRAM_end();})) {
         overlay_status("Failed to program SRAM");
         goto load_core_close;
     }
+#if defined(TC_LAUNCH_TRACE) || !defined(TC_JTAG_SPI_HZ)
     time_total = bflb_mtimer_get_time_us() - time_total;
     DEBUG("Time: total=%lld us, jtag=%lld us, flash=%lld us, writetdi=%lld us", time_total, time_jtag, 
         time_flash, jtag_writetdi_time - writetdi_time_start);
+#endif
 
     // printf("Status after program sram: %x\n", readStatusReg());
     res = true;
 
 load_core_close:
+#ifdef TC_JTAG_SPI_HZ
+    if(spi_attempted){
+        if(!tc_jtag_spi_close())res=false;
+#ifdef TC_LAUNCH_TRACE
+        if(tc_transition_active){
+            auto &record=*tc_transition_active;
+            ++record.jtag_spi_attempts;
+            record.jtag_spi=tc_jtag_spi_stats();
+            if(!record.jtag_spi_first_error)
+                record.jtag_spi_first_error=static_cast<unsigned>(record.jtag_spi.error);
+        }
+#endif
+    }
+#endif
     f_close(&fcore);
 
 	disable_jtag_pins();
@@ -1266,7 +1318,12 @@ bool fpga_program(const char* fname, bool try_short_boot_wait) {
     const char* base = strrchr(fname, '/');
     const bool monitor = strcmp(base ? base+1 : fname, "monitor.bin") == 0;
     const bool short_wait=monitor && try_short_boot_wait;
+#ifdef TC_JTAG_SPI_HZ
+    // Observe the native-select pad during every JTAG DMA stream, including launch.
+    select = RecoveryPort::NativeDrive | GPIO_INPUT_EN;
+#else
     select = RecoveryPort::NativeDrive | (short_wait ? GPIO_INPUT_EN : 0u);
+#endif
     bflb_mtimer_delay_us(10);
     RecoveryPort port{fname, saved, short_wait};
 #ifdef TC_LAUNCH_TRACE

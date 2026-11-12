@@ -1,6 +1,9 @@
 #pragma once
 #include <cstdint>
 #include "tc_launch_trace.h"
+#if defined(TC_LAUNCH_TRACE) && defined(TC_JTAG_SPI_HZ)
+#include "tc_jtag_spi.h"
+#endif
 
 // Inclusive section durations. Nested sections must not be added together.
 enum class TcTransitionStep : unsigned {
@@ -58,6 +61,10 @@ struct TcShortBootTrace {
 };
 #endif
 struct TcTransitionRecord {
+#if defined(TC_LAUNCH_TRACE) && defined(TC_JTAG_SPI_HZ)
+    TcJtagSpiStats jtag_spi;
+    unsigned jtag_spi_attempts=0,jtag_spi_first_error=0;
+#endif
 #ifdef TC_LAUNCH_TRACE
     TcBootObservation boot;
     TcShortBootTrace short_boot;
