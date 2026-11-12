@@ -10,7 +10,7 @@ extern "C" {
 
 // main function: program FPGA with a bitstream (.bin) file
 // return true if successful
-extern bool fpga_program(const char *fname);
+extern bool fpga_program(const char *fname, bool try_short_boot_wait);
 
 #ifdef __cplusplus
 }

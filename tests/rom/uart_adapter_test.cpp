@@ -73,13 +73,9 @@ extern "C" void bflb_dma_channel_tcint_clear(bflb_device_s *){}
 extern "C" int bflb_dma_channel_lli_reload(bflb_device_s *,bflb_dma_channel_lli_pool_s *,int pool,bflb_dma_channel_lli_transfer_s *t,int count){
     assert(!channel_active&&pool==1&&count==1&&t->nbytes<=MaxFrame);transfer=*t;return fail_dma?0:1;
 }
-extern "C" void bflb_dma_channel_start(bflb_device_s *){
-    assert(tc_rom_uart_owned()&&!critical);pumping=true;channel_active=true;
-    if(delay_dma)busy_polls=12;
-    const auto *wire=reinterpret_cast<const std::uint8_t*>(transfer.src_addr);
-    dma_snapshot.assign(wire,wire+transfer.nbytes);
+static void accept_wire(const std::uint8_t *wire,std::size_t size){
     if(wire[5]==2)assert(++data_attempts[get32(wire+10)]<=4);
-    std::vector<std::uint8_t> frame(wire,wire+transfer.nbytes);View f;
+    std::vector<std::uint8_t> frame(wire,wire+size);View f;
     if(damage&&wire[5]==2){frame[20]^=1;damage=false;}
     if(!decode(frame.data(),frame.size(),f))return;
     std::uint8_t status=0;
@@ -107,6 +103,32 @@ extern "C" void bflb_dma_channel_start(bflb_device_s *){
         pending.push_back({ticks+wait,std::vector<std::uint8_t>(reply.begin(),reply.begin()+first)});
         if(split_ack)pending.push_back({ticks+wait+3,std::vector<std::uint8_t>(reply.begin()+first,reply.end())});
     }else rx.insert(rx.end(),reply.begin(),reply.end());
+}
+#ifdef TC_ROM_SPI
+static bool spi_open=false,spi_fault=false;
+static unsigned spi_frames=0;
+bool tc_spi_open(){assert(!spi_open && baud==8000000 && tc_rom_uart_owned());spi_open=true;return true;}
+void tc_spi_close(){assert(spi_open);spi_open=false;}
+bool tc_spi_send(const std::uint8_t *wire,std::size_t size,std::uint32_t,void (*pump)(void*),void *context){
+    assert(spi_open && wire[5]==2 && baud==8000000);
+    ++spi_frames;
+    if(spi_fault)return false;
+    const std::vector<std::uint8_t> pinned(wire,wire+size);
+    accept_wire(wire,size);
+    if(pump)pump(context);
+    assert(std::equal(pinned.begin(),pinned.end(),wire));
+    return true;
+}
+#endif
+extern "C" void bflb_dma_channel_start(bflb_device_s *){
+    assert(tc_rom_uart_owned()&&!critical);pumping=true;channel_active=true;
+    if(delay_dma)busy_polls=12;
+    const auto *wire=reinterpret_cast<const std::uint8_t*>(transfer.src_addr);
+    dma_snapshot.assign(wire,wire+transfer.nbytes);
+#ifdef TC_ROM_SPI
+    assert(!spi_open);
+#endif
+    accept_wire(wire,transfer.nbytes);
 }
 extern "C" void bflb_dma_channel_stop(bflb_device_s *){pinned_unchanged();pumping=false;busy_polls=0;channel_active=false;}
 void tc_rom_uart_rx_flush(){rx.clear();}
@@ -182,6 +204,21 @@ int main(){
         assert(!tc_rom_uart_load_snes(file,0,16384,header)&&!running&&!starts&&!tc_rom_uart_owned()&&baud==2000000);
         assert(!channel_active);
     }
+#ifdef TC_ROM_SPI
+    assert(spi_frames==0);
+    for(unsigned bytes:{2u*1024*1024,4u*1024*1024}){
+        reset(bytes,512);tc_rom_uart_capabilities(true,true,true);spi_frames=0;lose=damage=true;
+        FIL file{0,input.size()};
+        assert(tc_rom_uart_load_snes(file,512,bytes,header) && starts==1 && !spi_open);
+        assert(spi_frames>bytes/1024 && committed.size()==bytes+64);
+        assert(std::equal(committed.begin(),committed.begin()+64,header));
+        assert(std::equal(committed.begin()+64,committed.end(),input.begin()+512));
+    }
+    reset(8192,0);tc_rom_uart_capabilities(true,true,true);spi_fault=true;
+    FIL faulty{0,input.size()};
+    assert(!tc_rom_uart_load_snes(faulty,0,8192,header) && !spi_open && !starts && !tc_rom_uart_owned());
+    std::puts("PASS real loader with mock SPI: 2/4 MiB, copier header, UART control, retries, SPI fault cleanup");
+#endif
     tc_rom_uart_capabilities(true,false);assert(!tc_rom_uart_capable());
     std::puts("Actual UART adapter: DMA framing, two 4 KiB FatFs buffers, 2/4 MiB and copier512, CRC/ACK retry, printf exclusion, short/read/DMA/no-ACK failures passed");
 }

@@ -26,7 +26,7 @@ static bool osd_config_ready=false,osd_config_capable=false;
 static bool crt_stage1_capable=false,crt_blur_capable=false,crt_scanline_capable=false,restart_capable=false;
 static bool rom_owned=false,rom_capable=false,switch_on_enter=false;
 bool tc_rom_uart_owned(){return rom_owned;}
-void tc_rom_uart_capabilities(bool protocol,bool uart8){rom_capable=protocol&&uart8;}
+void tc_rom_uart_capabilities(bool protocol,bool uart8,bool){rom_capable=protocol&&uart8;}
 void ui16_crt_accept_status(uint32_t){}
 static int depth=0;static unsigned core_id=0,joy1_state=0,joy2_state=0;void *state_mutex=nullptr;
 #define pdTRUE 1

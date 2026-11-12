@@ -26,7 +26,7 @@ struct Fake {
     static Fake &get(void *p){return *static_cast<Fake*>(p);}
     static bool file(const char *p,void *v){auto &f=get(v);f.calls.push_back("stat:"+std::string(p));return f.rom;}
     static bool find(const char *n,std::string &p,void *v){auto &f=get(v);f.calls.push_back("find:"+std::string(n));p="sd:cores/console138k/"+std::string(n);return std::string(n)=="monitor.bin"?f.monitor:f.core;}
-    static bool prog(const char *p,void *v){auto &f=get(v);f.calls.push_back("program:"+std::string(p));return f.program;}
+    static bool prog(const char *p,bool,void *v){auto &f=get(v);f.calls.push_back("program:"+std::string(p));return f.program;}
     static bool probe(int id,void *v){auto &f=get(v);f.calls.push_back("wait:"+std::to_string(id));return f.wait;}
     static bool romload(int id,const char *p,void *v){auto &f=get(v);f.calls.push_back("load:"+std::to_string(id)+":"+p);return f.load;}
     static void display(bool owner,void *v){auto &f=get(v);f.calls.push_back(owner?"ui16":"legacy");f.owner=owner;}

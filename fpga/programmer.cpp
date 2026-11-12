@@ -11,10 +11,16 @@
 
 #include <string.h>
 #include "programmer.h"
+#ifdef TANG_CONSOLE138K
+#include "ct2090.h"
+#include "hardware/gpio_reg.h"
+#include "hardware/uart_reg.h"
+#endif
 #include <FreeRTOS.h>
 #include "task.h"
 #include "utils.h"
 #include "overlay.h"
+#include "tc_transition_trace.h"
 
 #define JTAG_MAX_CHAIN 8
 
@@ -198,7 +204,48 @@ void jtag_exit_gpio_out_mode() {
 // nand2mario: this is faster than jtag_writeTDI()
 // 1. avoid data conversion by writing *tx MSB first
 // 2. use GPIO_CFG144 to set GPIO0-3 as output
+#ifdef TANG_CONSOLE138K
+// Keep direct bit calculation: the nibble-table version measured slower.
+// Inlining with constant end removes per-byte final-bit decisions.
+static inline __attribute__((always_inline)) void jtag_emit_byte(uint8_t byte, bool end) {
+
+		// bit 7
+		*reg_gpio0_31 = (byte & 0x80) >> 4;           // bit 3 (TDI) = data, bit 1 (TCK) = 0
+		*reg_gpio0_31 = ((byte & 0x80) >> 4) | 2;     // bit 3 (TDI) = data, bit 1 (TCK) = 1
+		// bit 6
+		*reg_gpio0_31 = (byte & 0x40) >> 3;
+		*reg_gpio0_31 = ((byte & 0x40) >> 3) | 2;
+		// bit 5
+		*reg_gpio0_31 = (byte & 0x20) >> 2;
+		*reg_gpio0_31 = ((byte & 0x20) >> 2) | 2;
+		// bit 4
+		*reg_gpio0_31 = (byte & 0x10) >> 1;
+		*reg_gpio0_31 = ((byte & 0x10) >> 1) | 2;
+		// bit 3
+		*reg_gpio0_31 = (byte & 0x8);
+		*reg_gpio0_31 = (byte & 0x8) | 2;
+		// bit 2
+		*reg_gpio0_31 = (byte & 0x4) << 1;
+		*reg_gpio0_31 = ((byte & 0x4) << 1) | 2;
+		// bit 1
+		*reg_gpio0_31 = (byte & 0x2) << 2;
+		*reg_gpio0_31 = ((byte & 0x2) << 2) | 2;
+		// bit 0
+		*reg_gpio0_31 = ((byte & 0x1) << 3) | end;  	// TMS=1 if at the end
+		*reg_gpio0_31 = ((byte & 0x1) << 3) | 2 | end;	// TMS=1 if at the end
+
+}
+#endif
+
 void jtag_writeTDI_msb_first_gpio_out_mode(const uint8_t *tx, int bytes, bool end) {
+#ifdef TANG_CONSOLE138K
+    const int regular=bytes-((end && bytes>0)?1:0);
+    for(int i=0;i<regular;++i)
+        jtag_emit_byte(tx[i],false);
+    if(end && bytes>0)
+        jtag_emit_byte(tx[bytes-1],true);
+#else
+
 	for (int i = 0; i < bytes; i++) {
 		uint8_t byte = tx[i];
 #ifdef TANG_NANO20K
@@ -253,6 +300,7 @@ void jtag_writeTDI_msb_first_gpio_out_mode(const uint8_t *tx, int bytes, bool en
 		*reg_gpio0_31 = ((byte & 0x1) << 3) | 2 | (i == bytes-1 && end);	// TMS=1 if at the end
 #endif
 	}
+#endif
 	_curr_tms = end;
 }
 
@@ -316,17 +364,15 @@ static int flushTMS(bool flush_buffer) {
 static int jtag_toggleClk_(uint8_t tms, uint8_t tdi, uint32_t clk_len)
 {
 	// uint32_t start = get_mcycle();	
-	for (uint32_t i = 0; i < clk_len; i++) {
-        if (tms) GPIO_PIN_JTAG_TMS_H(); else GPIO_PIN_JTAG_TMS_L();     // send TMS
-        if (tdi) GPIO_PIN_JTAG_TDI_H(); else GPIO_PIN_JTAG_TDI_L();     // send TDI
-        GPIO_PIN_JTAG_TCK_L();                                          // low  TCK
-		// start = wait_mcycle(start, JTAG_DELAY);
-
-        if (tms) GPIO_PIN_JTAG_TMS_H(); else GPIO_PIN_JTAG_TMS_L();     // send TMS
-        if (tdi) GPIO_PIN_JTAG_TDI_H(); else GPIO_PIN_JTAG_TDI_L();     // send TDI
-        GPIO_PIN_JTAG_TCK_H();                                          // high TCK
-		// start = wait_mcycle(start, JTAG_DELAY);
+    if(clk_len){
+        if(tms)GPIO_PIN_JTAG_TMS_H();else GPIO_PIN_JTAG_TMS_L();
+        if(tdi)GPIO_PIN_JTAG_TDI_H();else GPIO_PIN_JTAG_TDI_L();
     }
+    for(uint32_t i=0;i<clk_len;++i){
+        GPIO_PIN_JTAG_TCK_L();
+        GPIO_PIN_JTAG_TCK_H();
+    }
+
 	_curr_tms = tms;
 	_curr_tdi = tdi;
 	
@@ -749,7 +795,10 @@ void sendClkUs(unsigned us)
 	uint64_t clocks = 15000000;     // very rough estimate: 15Mhz
 	clocks *= us;
 	clocks /= 1000000;
-	jtag_toggleClk(clocks);
+    const uint64_t started=bflb_mtimer_get_time_us();
+    jtag_toggleClk(clocks);
+    while(bflb_mtimer_get_time_us()-started<us)
+        jtag_toggleClk(1);
 }
 
 
@@ -945,9 +994,14 @@ void disable_jtag_pins(void) {
 
 /////////////// top programming functions ///////////////
 
-bool fpga_program(const char *fname) {
+static bool program_image(const char *fname
+#ifdef TANG_CONSOLE138K
+                          , const Ct2090::Snapshot& expected
+#endif
+) {
+    TcTransitionSection measured_program(TcTransitionStep::Program);
     uint64_t writetdi_time_start;
-    uint64_t time_total;
+    uint64_t time_total = bflb_mtimer_get_time_us();
     UINT bytes = 0, total = 0;
     uint64_t time_jtag = 0, time_flash = 0;
 
@@ -956,10 +1010,11 @@ bool fpga_program(const char *fname) {
     //     overlay_printf("mount fail, res:%d\r\n", res_sd);
     //     return false;
     // }
-    int len = get_file_size(fname);
+    int len = tc_transition_call(TcTransitionStep::FilePrepare,[&](){return get_file_size(fname);});
+    if (len <= 0) return false;
     overlay_status("Writing %u bytes...", len);
 
-    FRESULT res_sd = f_open(&fcore, fname, FA_READ);
+    FRESULT res_sd = tc_transition_call(TcTransitionStep::FilePrepare,[&](){return f_open(&fcore, fname, FA_READ);});
     if (res_sd != FR_OK) {
         overlay_printf("open fail, res:%d\r\n", res_sd);
         return false;
@@ -969,7 +1024,7 @@ bool fpga_program(const char *fname) {
 	enable_jtag_pins();
 
     chain_len = detectChain(JTAG_MAX_CHAIN);
-    if (chain_len == 0 || (    idcodes[0] != IDCODE_GW5AT_60 
+    if (chain_len <= 0 || (    idcodes[0] != IDCODE_GW5AT_60
                             && idcodes[0] != IDCODE_GWAST_138
                             && idcodes[0] != IDCODE_GW5A_25
                             && idcodes[0] != IDCODE_GW2A_18)) {
@@ -977,88 +1032,64 @@ bool fpga_program(const char *fname) {
         goto load_core_close;
     }
 
-    if (!eraseSRAM()) {
+#ifdef TANG_CONSOLE138K
+    // Recheck after opening the file and reacquiring JTAG, before the first erase.
+    if (chain_len != 1) goto load_core_close;
+    {
+        const auto id=idCode();
+        if (id != expected.id) goto load_core_close;
+        const auto user=readUserCode();
+        if (user != expected.user) goto load_core_close;
+        const auto status=readStatusReg();
+        if (status != expected.status) goto load_core_close;
+#ifdef TC_LAUNCH_TRACE
+        if (tc_transition_active && tc_transition_active->boot.samples) {
+            auto &boot=tc_transition_active->boot;
+            boot.pre_id=id;
+            boot.pre_user=user;
+            boot.pre_status=status;
+            boot.preerase_us=tc_launch_now_us()-boot.start_us;
+        }
+#endif
+    }
+#endif
+    if (!tc_transition_call(TcTransitionStep::EraseFirst,[](){return eraseSRAM();})) {
         overlay_printf("Failed to erase SRAM\n");
         goto load_core_close;
     }
 
     // 138K needs erasing twice
     overlay_status("Erasing again...");
-    if (!eraseSRAM()) {
+    if (!tc_transition_call(TcTransitionStep::EraseSecond,[](){return eraseSRAM();})) {
         overlay_printf("Failed to erase SRAM 2nd time\n");
         goto load_core_close;
     }    
 
-    if (!writeSRAM_start()) {
+    if (!tc_transition_call(TcTransitionStep::WriteBegin,[](){return writeSRAM_start();})) {
         overlay_printf("Failed to start write SRAM\n");
         goto load_core_close;
     }
 
-    BYTE *fbuf_cached;
-    fbuf_cached = (BYTE*)malloc(BLOCK_SIZE);
-    if (!fbuf_cached) {
-        overlay_printf("Cannot malloc buffer\r\n");
-        goto load_core_close;
-    }
-
-#define JTAG_FAST
-
     extern uint64_t jtag_writetdi_time;
     writetdi_time_start = jtag_writetdi_time;
-    time_total = bflb_mtimer_get_time_us();
-#ifdef JTAG_FAST
     taskENTER_CRITICAL();
+    {
+    TcTransitionSection measured_stream(TcTransitionStep::Stream);
     jtag_enter_gpio_out_mode();
-    for (;;) {
-        f_read(&fcore, fbuf, BLOCK_SIZE, &bytes);
-        if (bytes == 0) break;
+    while (total < static_cast<UINT>(len)) {
+        const UINT left = static_cast<UINT>(len) - total;
+        const UINT want = left < BLOCK_SIZE ? left : BLOCK_SIZE;
+        if (tc_transition_call(TcTransitionStep::SdRead,[&](){return f_read(&fcore, fbuf, want, &bytes);}) != FR_OK || bytes != want) break;
         total += bytes;
-        jtag_writeTDI_msb_first_gpio_out_mode(fbuf, bytes, total >= len);
-        if (bytes < BLOCK_SIZE) break;
+        tc_transition_call(TcTransitionStep::JtagShift,[&](){jtag_writeTDI_msb_first_gpio_out_mode(fbuf, bytes, total == static_cast<UINT>(len));});
     }
     jtag_exit_gpio_out_mode();
-    if (!writeSRAM_end()) {
-        overlay_status("Failed to program SRAM\n");
+    }
+    taskEXIT_CRITICAL();
+    if (total != static_cast<UINT>(len) || !tc_transition_call(TcTransitionStep::WriteEnd,[](){return writeSRAM_end();})) {
+        overlay_status("Failed to program SRAM");
         goto load_core_close;
     }
-    taskEXIT_CRITICAL();
-
-#else
-    taskENTER_CRITICAL();
-    for (;;) {
-        uint64_t time_flash_start = bflb_mtimer_get_time_us();
-        f_read(&fcore, fbuf, BLOCK_SIZE, &bytes);
-        time_flash += bflb_mtimer_get_time_us() - time_flash_start;
-        // overlay_status("f_read: offset=%u, bytes=%d, 4 bytes=%02x %02x %02x %02x", 
-        //     (uint32_t)f_tell(&fcore), bytes, fbuf[0], fbuf[1], fbuf[2], fbuf[3]);
-
-        if (bytes == 0) break;
-        // reverse msb/lsb as Gowin bitstream needs to MSB first
-        // also copy to cached memory for better performance
-        static unsigned char lookup[16] = {
-            0x0, 0x8, 0x4, 0xc, 0x2, 0xa, 0x6, 0xe,
-            0x1, 0x9, 0x5, 0xd, 0x3, 0xb, 0x7, 0xf, };
-        for (int j = 0; j < bytes; j++)
-            fbuf_cached[j] = lookup[fbuf[j] & 0xf] << 4 | lookup[fbuf[j] >> 4];
-
-        total += bytes;
-        uint64_t time_jtag_start = bflb_mtimer_get_time_us();
-        if (!writeSRAM_send(fbuf_cached, bytes*8, total >= len)) {
-            overlay_status("Failed to send data to SRAM\n");
-            goto free_fbuf_cached;
-        }
-        time_jtag += bflb_mtimer_get_time_us() - time_jtag_start;
-        if (bytes < BLOCK_SIZE) break;
-    } 
-    if (!writeSRAM_end()) {
-        overlay_status("Failed to program SRAM\n");
-        goto free_fbuf_cached;
-    }
-    taskEXIT_CRITICAL();
-
-    free(fbuf_cached);
-#endif
-
     time_total = bflb_mtimer_get_time_us() - time_total;
     DEBUG("Time: total=%lld us, jtag=%lld us, flash=%lld us, writetdi=%lld us", time_total, time_jtag, 
         time_flash, jtag_writetdi_time - writetdi_time_start);
@@ -1072,4 +1103,191 @@ load_core_close:
 	disable_jtag_pins();
 	
     return res;
+}
+
+#ifdef TANG_CONSOLE138K
+namespace {
+struct RecoveryPort {
+    const char* path;
+    uint32_t uart_pin_config;
+    bool short_wait;
+    // SET/CLEAR mode uses the SET command to drive high. Sense the pad through
+    // the input buffer, while keeping the output enabled and in SET/CLEAR mode.
+    static constexpr uint32_t NativeDrive=GPIO_INT_MASK | GPIO_FUNC_SWGPIO | GPIO_OUTPUT_EN |
+        GPIO_SCHMITT_EN | GPIO_MODE_SETCLR | GLB_REG_GPIO_0_SET;
+    static constexpr uint32_t NativeMask=GLB_REG_GPIO_0_FUNC_SEL_MASK | GLB_REG_GPIO_0_MODE_MASK |
+        GPIO_OUTPUT_EN | GPIO_INPUT_EN | GLB_REG_GPIO_0_I;
+    static constexpr uint32_t NativeExpected=GPIO_FUNC_SWGPIO | GPIO_MODE_SETCLR |
+        GPIO_OUTPUT_EN | GPIO_INPUT_EN | GLB_REG_GPIO_0_I;
+#ifdef TC_LAUNCH_TRACE
+    TcShortBootTrace *short_trace=nullptr;
+#endif
+    bool uart_idle() const {
+        return bflb_uart_txempty(uart1_dev) &&
+            !(getreg32(uart1_dev->reg_base + UART_STATUS_OFFSET) & UART_STS_UTX_BUS_BUSY);
+    }
+    bool snapshot(Ct2090::Snapshot& out) {
+        TcTransitionSection measured(TcTransitionStep::Snapshot);
+        enable_jtag_pins();
+        if (detectChain(JTAG_MAX_CHAIN) != 1) return false;
+        go_test_logic_reset();
+        out.id = idCode();
+        if (out.id != Ct2090::Device) return false;
+        out.status = readStatusReg();
+        out.user = readUserCode();
+        return true;
+    }
+    bool reload() {
+        TcTransitionSection measured(TcTransitionStep::Reload);
+#ifdef TC_LAUNCH_TRACE
+        auto *observation=tc_transition_active ? &tc_transition_active->boot : nullptr;
+        if (observation) {
+            *observation={};
+            observation->start_us=tc_launch_now_us();
+        }
+        if (short_trace) short_trace->reload_started=true;
+#endif
+        go_test_logic_reset();
+        fpgaReset();
+        const uint64_t wait_start=bflb_mtimer_get_time_us();
+#ifdef TC_LAUNCH_TRACE
+        if (observation) observation->idle_end_us=tc_launch_now_us()-observation->start_us;
+#endif
+        // Clear the legacy logo once the known boot image is identified.
+        // A short wait continues polling to verify stability after the logo is cleared.
+        TcTransitionSection measured_wait(TcTransitionStep::BootWait);
+        bool cleared = false;
+        bool logo_timeout=false;
+        unsigned ready_count=0;
+        bool accepted=false;
+        for (unsigned step = 0; step < 50; ++step) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            if (short_wait && bflb_mtimer_get_time_us()-wait_start>5000000) break;
+#ifdef TC_LAUNCH_TRACE
+            if (cleared && !short_wait && !observation) continue;
+#else
+            if (cleared && !short_wait) continue;
+#endif
+            Ct2090::Snapshot boot{};
+            const bool snapshot_ok=snapshot(boot);
+            const bool matched=snapshot_ok && boot.id==Ct2090::Device &&
+                boot.user==Ct2090::Boot && boot.status==Ct2090::BootStatus;
+#ifdef TC_LAUNCH_TRACE
+            if (observation) observation->sample(matched,tc_launch_now_us());
+#endif
+            if (matched && !cleared) {
+            auto& select = *reinterpret_cast<volatile uint32_t*>(
+                gpio_dev->reg_base + GLB_GPIO_CFG0_OFFSET + 28 * sizeof(uint32_t));
+            const uint32_t native = select;
+            select = uart_pin_config & ~uint32_t(GLB_REG_GPIO_0_INT_CLR);
+            overlay_clear_logo();
+            // The last stop bit must leave GPIO28 before native selection.
+            const auto started = bflb_mtimer_get_time_us();
+            while (!uart_idle()) {
+                if (bflb_mtimer_get_time_us() - started >= 20000) {
+                    logo_timeout=true;
+#ifdef TC_LAUNCH_TRACE
+                    if (observation) observation->uart_timeout=true;
+#endif
+                    break;
+                }
+            }
+            select = short_wait ? NativeDrive | GPIO_INPUT_EN : native;
+            bflb_mtimer_delay_us(10);
+#ifdef TC_LAUNCH_TRACE
+            if (observation && !observation->uart_timeout)
+                observation->uart_idle_us=tc_launch_now_us()-observation->start_us;
+#endif
+            cleared = true;
+            }
+            if (short_wait) {
+                // Read every check independently so the trace identifies simultaneous failures.
+                const bool fifo_empty=bflb_uart_txempty(uart1_dev);
+                const bool bus_idle=!(getreg32(uart1_dev->reg_base + UART_STATUS_OFFSET) & UART_STS_UTX_BUS_BUSY);
+                const auto gpio28=*reinterpret_cast<volatile uint32_t*>(
+                    gpio_dev->reg_base + GLB_GPIO_CFG0_OFFSET + 28 * sizeof(uint32_t));
+                const bool native=(gpio28 & NativeMask)==NativeExpected;
+                const bool ready=matched && !logo_timeout && fifo_empty && bus_idle && native;
+                ready_count=ready ? ready_count+1 : 0;
+                const auto elapsed=bflb_mtimer_get_time_us()-wait_start;
+#ifdef TC_LAUNCH_TRACE
+                if (short_trace && short_trace->probe_count<TcShortBootTrace::MaxProbes) {
+                    auto &probe=short_trace->probes[short_trace->probe_count++];
+                    probe.gpio28=gpio28;
+                    probe.elapsed_us=static_cast<uint32_t>(elapsed);
+                    probe.mark(TcBootProbe::Snapshot,snapshot_ok);
+                    probe.mark(TcBootProbe::Id,boot.id==Ct2090::Device);
+                    probe.mark(TcBootProbe::User,snapshot_ok && boot.user==Ct2090::Boot);
+                    probe.mark(TcBootProbe::Status,snapshot_ok && boot.status==Ct2090::BootStatus);
+                    probe.mark(TcBootProbe::FifoEmpty,fifo_empty);
+                    probe.mark(TcBootProbe::BusIdle,bus_idle);
+                    probe.mark(TcBootProbe::LogoNoTimeout,!logo_timeout);
+                    probe.mark(TcBootProbe::LogoAttempted,cleared);
+                    probe.mark(TcBootProbe::Native,native);
+                    probe.mark(TcBootProbe::MinimumWait,elapsed>=1000000);
+                    probe.mark(TcBootProbe::WithinDeadline,elapsed<=5000000);
+                    probe.mark(TcBootProbe::Stable,ready_count>=3);
+                }
+#endif
+                if (elapsed>5000000) break;
+                if (elapsed>=1000000 && ready_count>=3) {
+                    accepted=true;
+                    break;
+                }
+            }
+        }
+#ifdef TC_LAUNCH_TRACE
+        if (observation) observation->end_us=tc_launch_now_us()-observation->start_us;
+        if (short_trace) {
+            short_trace->wait_accepted=accepted;
+            short_trace->wait_end_us=static_cast<uint32_t>(bflb_mtimer_get_time_us()-wait_start);
+        }
+#endif
+        return !short_wait || accepted;
+    }
+    bool program(const Ct2090::Snapshot& expected) {
+#ifdef TC_LAUNCH_TRACE
+        if (short_trace) short_trace->program_entered=true;
+#endif
+        return program_image(path, expected);
+    }
+};
+}
+#endif
+
+bool fpga_program(const char* fname, bool try_short_boot_wait) {
+#ifdef TANG_CONSOLE138K
+    static bool monitor_confirmed = false;
+    // GPIO28 is also UART TX. Drive native selection in one register write
+    // and restore its original function only after the JTAG pins are released.
+    auto& select = *reinterpret_cast<volatile uint32_t*>(
+        gpio_dev->reg_base + GLB_GPIO_CFG0_OFFSET + 28 * sizeof(uint32_t));
+    const uint32_t saved = select;
+    const char* base = strrchr(fname, '/');
+    const bool monitor = strcmp(base ? base+1 : fname, "monitor.bin") == 0;
+    const bool short_wait=monitor && try_short_boot_wait;
+    select = RecoveryPort::NativeDrive | (short_wait ? GPIO_INPUT_EN : 0u);
+    bflb_mtimer_delay_us(10);
+    RecoveryPort port{fname, saved, short_wait};
+#ifdef TC_LAUNCH_TRACE
+    if (short_wait && tc_transition_active) {
+        port.short_trace=&tc_transition_active->short_boot;
+        auto &attempt=*port.short_trace;
+        attempt.attempted=true;
+        attempt.gpio_before_select=saved;
+        attempt.gpio_after_select=select;
+        attempt.gpio_mask=RecoveryPort::NativeMask;
+        attempt.gpio_expected=RecoveryPort::NativeExpected;
+    }
+#endif
+    const bool ok = Ct2090::configure(port, monitor, monitor_confirmed);
+#ifdef TC_LAUNCH_TRACE
+    if (port.short_trace) port.short_trace->configured=ok;
+#endif
+    disable_jtag_pins();
+    select = saved & ~uint32_t(GLB_REG_GPIO_0_INT_CLR);
+    return ok;
+#else
+    return program_image(fname);
+#endif
 }

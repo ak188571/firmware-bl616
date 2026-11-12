@@ -35,6 +35,7 @@ extern "C" {
 #include "menu_manager.h"
 #include "tc_launch_trace.h"
 #include "tc_launch_export.h"
+#include "tc_transition_trace.h"
 #include "tc_rom_uart.h"
 #ifdef TC_LAUNCH_TRACE
 std::uint64_t tc_launch_now_us(){return bflb_mtimer_get_time_us();}
@@ -175,7 +176,7 @@ static int menu_loadrom(const char *dir) {
     // load core if in cores/ dir
     if (fname.find(string(drv) + "cores") == 0) {
         overlay_status("Core: %s", fname.c_str());
-        fpga_program(fname.c_str());
+        fpga_program(fname.c_str(),false);
         _overlay_on = 1;                // turn on overlay after core is loaded
         return 0;       // return to main menu
     }
@@ -205,7 +206,7 @@ static int menu_loadrom(const char *dir) {
             string fname_core;
             if (find_core_for_board(fname_core, core->core_file)) {
                 // load core
-                fpga_program(fname_core.c_str());
+                fpga_program(fname_core.c_str(),false);
                 _overlay_on = 1;
 
                 // allow 2 seconds for core to start
@@ -412,7 +413,7 @@ static void uart1_rx_task(void *pvParameters)
 #ifdef UI16_SYSTEM_MENU
     char osd_tag[7]={};
     unsigned osd_tag_count=0;
-    bool osd_tag_found=false,crt_tag_found=false,blur_tag_found=false,scan_tag_found=false,restart_tag_found=false,rom_tag_found=false,uart8_tag_found=false;
+    bool osd_tag_found=false,crt_tag_found=false,blur_tag_found=false,scan_tag_found=false,restart_tag_found=false,rom_tag_found=false,spi_tag_found=false,uart8_tag_found=false;
 #endif
     while (1) {
         uint8_t ch=0;
@@ -463,7 +464,7 @@ static void uart1_rx_task(void *pvParameters)
                 pos = 0;
             } else if (type == 2) {                 // config string / OSD feature marker
 #ifdef UI16_SYSTEM_MENU
-                if(pos==4){osd_tag_count=0;osd_tag_found=false;crt_tag_found=false;blur_tag_found=false;scan_tag_found=false;restart_tag_found=false;rom_tag_found=false;uart8_tag_found=false;}
+                if(pos==4){osd_tag_count=0;osd_tag_found=false;crt_tag_found=false;blur_tag_found=false;scan_tag_found=false;restart_tag_found=false;rom_tag_found=false;spi_tag_found=false;uart8_tag_found=false;}
                 for(unsigned i=0;i<6;++i)osd_tag[i]=osd_tag[i+1];
                 osd_tag[6]=static_cast<char>(ch);
                 if(++osd_tag_count>=7&&memcmp(osd_tag,"OSDWIN1",7)==0)osd_tag_found=true;
@@ -473,8 +474,9 @@ static void uart1_rx_task(void *pvParameters)
                 if(osd_tag_count>=7&&memcmp(osd_tag,"RSTROM1",7)==0)restart_tag_found=true;
                 if(osd_tag_count>=7&&memcmp(osd_tag,"ROMXFR1",7)==0)rom_tag_found=true;
                 if(osd_tag_count>=7&&memcmp(osd_tag,"UART8M1",7)==0)uart8_tag_found=true;
+                if(osd_tag_count>=7&&memcmp(osd_tag,"SPIDAT1",7)==0)spi_tag_found=true;
                 if(pos==len+2){
-                    tc_rom_uart_capabilities(rom_tag_found,uart8_tag_found);
+                    tc_rom_uart_capabilities(rom_tag_found,uart8_tag_found,spi_tag_found);
                     taskENTER_CRITICAL();restart_capable=osd_tag_found&&restart_tag_found;crt_blur_capable=osd_tag_found&&crt_tag_found&&blur_tag_found;crt_scanline_capable=crt_blur_capable&&scan_tag_found;osd_config_capable=osd_tag_found;crt_stage1_capable=osd_tag_found&&crt_tag_found;osd_config_ready=true;taskEXIT_CRITICAL();
                 }
 #endif
@@ -600,7 +602,7 @@ static bool ui16_hw_find_core(const char *name,std::string &path,void *)
     FILINFO info{};
     return find_core_for_board(path,name)&&f_stat(path.c_str(),&info)==FR_OK&&!(info.fattrib&AM_DIR)&&info.fsize>0;
 }
-static bool ui16_hw_program(const char *path,void *)
+static bool ui16_hw_program(const char *path,bool try_short_boot_wait,void *)
 {
     core_running=false;active_core=-1;
     crt_rom_identity={};crt_restore={};crt_defaults={};
@@ -608,7 +610,7 @@ static bool ui16_hw_program(const char *path,void *)
     TcStorageLease lease;if(!lease)return false;
     extern bool gba_bios_loaded,gba_missing_bios_warned;
     gba_bios_loaded=false;gba_missing_bios_warned=false;
-    const bool ok=fpga_program(path);
+    const bool ok=fpga_program(path,try_short_boot_wait);
     // Native FPGA pads report changes; discard the previous FPGA image's latch.
     taskENTER_CRITICAL();joy1_state=0;joy2_state=0;taskEXIT_CRITICAL();
     _overlay_on=1;
@@ -616,6 +618,7 @@ static bool ui16_hw_program(const char *path,void *)
 }
 static bool ui16_hw_wait_core(int expected,void *)
 {
+    TcTransitionSection measured(TcTransitionStep::WaitCore);
     const auto start=bflb_mtimer_get_time_ms();
     do {
         send_blank_packet();active_core=get_core_id();
@@ -640,12 +643,12 @@ static bool ui16_hw_load_rom(int id,const char *path,void *)
         // The JTAG phase has finished. Reuse the noncacheable loader resources
         // sequentially; identify_rom closes the read-only file before load_rom.
         tc_launch_mark(TcLaunchEvent::IdentityBegin);
-        crt_rom_identity=ui16_identify_rom(id,path,fcore,fbuf,BLOCK_SIZE,[](){delay(1);});
+        crt_rom_identity=tc_transition_call(TcTransitionStep::RomIdentity,[&](){return ui16_identify_rom(id,path,fcore,fbuf,BLOCK_SIZE,[](){delay(1);});});
         tc_launch_mark(TcLaunchEvent::IdentityEnd);
         if(tc_snes_sd_faulted()){crt_rom_identity={};return false;}
-        crt_restore=ui16_read_crt_override(crt_rom_identity,fcore,fbuf,BLOCK_SIZE);
+        crt_restore=tc_transition_call(TcTransitionStep::Settings,[&](){return ui16_read_crt_override(crt_rom_identity,fcore,fbuf,BLOCK_SIZE);});
         if(tc_snes_sd_faulted()){crt_rom_identity={};crt_restore={};return false;}
-        crt_defaults=ui16_read_crt_defaults(id,path,fcore,fbuf,BLOCK_SIZE);
+        crt_defaults=tc_transition_call(TcTransitionStep::Settings,[&](){return ui16_read_crt_defaults(id,path,fcore,fbuf,BLOCK_SIZE);});
         if(tc_snes_sd_faulted()){crt_rom_identity={};crt_restore={};crt_defaults={};return false;}
     }
     tc_launch_mark(TcLaunchEvent::SettingsEnd);
@@ -690,17 +693,29 @@ static std::uint16_t ui16_buttons()
 }
 static void ui16_wait_release()
 {
+    TcTransitionSection measured(TcTransitionStep::InputRelease);
     while(ui16_buttons())delay(10);
 }
-static void ui16_restore_menu(Ui16Runtime &runtime,Ui16Browser &browser)
+static void ui16_restore_menu(Ui16Runtime &runtime,Ui16Browser &browser,bool try_short_boot_wait)
 {
     for(;;){
-        const auto error=runtime.restore_monitor();
+        const bool short_wait=try_short_boot_wait;
+        try_short_boot_wait=false;
+        const auto error=runtime.restore_monitor(short_wait);
         if(error==Ui16LaunchError::None)break;
+        if(short_wait && error==Ui16LaunchError::MonitorProgramFailed){
+            // A second attempt performs a fresh RELOAD and full five-second wait.
+            overlay_status("RETRY: FULL 5S WAIT");
+            dprint("UI16 restore: automatic full-wait retry\n");
+            continue;
+        }
         overlay_status("%s; A/B retry",ui16_launch_error_text(error));
         dprint("UI16 restore: %s\n",ui16_launch_error_text(error));
+        overlay_status("%s; RELEASE BUTTONS",ui16_launch_error_text(error));
         ui16_wait_release();
+        overlay_status("%s; PRESS A/B",ui16_launch_error_text(error));
         while(!(ui16_buttons()&UI16_BUTTON_CONFIRM))delay(10);
+        overlay_status("RETRY: RELEASE BUTTONS");
         ui16_wait_release();
     }
     ui16_wait_release();browser.resume_input(0);
@@ -756,7 +771,7 @@ static void main_task(void *pvParameters)
     // load monitor core at startup
     string fname;
     if (find_core_for_board(fname, "monitor.bin")) {
-        const bool monitor_loaded = fpga_program(fname.c_str());
+        const bool monitor_loaded = fpga_program(fname.c_str(),false);
 #ifdef UI16_SYSTEM_MENU
         if (!monitor_loaded || !ui16_hw_wait_core(0,nullptr)) {
             overlay_status("UI16: monitor load failed");
@@ -856,12 +871,25 @@ static void main_task(void *pvParameters)
                             overlay(0);
                             continue;
                         }
-                        if(return_to_menu)break; // Return to Game List; reload monitor below.
+                        if(return_to_menu){
+                            tc_transition_begin(1);
+                            break;
+                        }
                         ui16_wait_release(); // OSD or X/Y closes the popup and resumes the game.
                     }
                     menu_clear();
                 }
-                ui16_restore_menu(runtime,browser);
+                tc_transition_begin(1); // Also cover restoration after a failed launch.
+                ui16_restore_menu(runtime,browser,error==Ui16LaunchError::None &&
+                    request.core_id==2 && std::string(drv)=="sd:");
+#ifdef UI16_SD_FONT
+                // FPGA reprogramming restores the initial embedded font ROM.
+                // Never trust a cached dynamic slot after returning from a game.
+                tc_transition_call(TcTransitionStep::FontReset,[](){ui16_font_monitor_reset();});
+#endif
+                browser.set_launch_error(error==Ui16LaunchError::None?nullptr:ui16_launch_error_text(error));
+                tc_transition_call(TcTransitionStep::Redraw,[&](){redraw();});
+                tc_transition_finish();
 #ifdef TC_LAUNCH_TRACE
                 // The measured game has ended and the monitor is restored.
                 // Export only now; no log write runs during loading or gameplay.
@@ -876,13 +904,6 @@ static void main_task(void *pvParameters)
                     }
                 }
 #endif
-#ifdef UI16_SD_FONT
-                // FPGA reprogramming restores the initial embedded font ROM.
-                // Never trust a cached dynamic slot after returning from a game.
-                ui16_font_monitor_reset();
-#endif
-                browser.set_launch_error(error==Ui16LaunchError::None?nullptr:ui16_launch_error_text(error));
-                redraw();
             }
             delay(10);
         }

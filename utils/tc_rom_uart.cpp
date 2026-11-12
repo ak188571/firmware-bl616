@@ -1,6 +1,9 @@
 #include "tc_rom_uart.h"
 #ifdef TC_ROM_UART
 #include "tc_rom_protocol.h"
+#ifdef TC_ROM_SPI
+#include "tc_spi_data.h"
+#endif
 #include "tc_launch_trace.h"
 #include "tc_rom_measure.h"
 #include "utils.h"
@@ -12,6 +15,10 @@ extern "C" {
 }
 namespace {
 volatile bool exclusive=false,capable=false;
+#ifdef TC_ROM_SPI
+volatile bool spi_capable=false;
+bool spi_stream=false;
+#endif
 volatile unsigned legacy_writers=0;
 bool acquire(){
     const auto started=bflb_mtimer_get_time_ms();
@@ -82,6 +89,13 @@ bool prepare_dma(){
 bool send_frame(void *,const std::uint8_t *request,std::size_t size,std::uint32_t timeout,
                 void (*pump)(void *),void *pump_context){
     if(!exclusive||!dma||size>TcRom::MaxFrame||!drained())return false;
+#ifdef TC_ROM_SPI
+    if(spi_stream){
+        if(size<6 || request[5]!=static_cast<std::uint8_t>(TcRom::Op::Data))return false;
+        if(!tc_spi_send(request,size,timeout,pump,pump_context))return false;
+        return true;
+    }
+#endif
     bflb_dma_channel_lli_transfer_s transfer{};
     transfer.src_addr=reinterpret_cast<std::uintptr_t>(request);transfer.dst_addr=DMA_ADDR_UART1_TDR;transfer.nbytes=size;
     const auto enqueue_start=tc_launch_clock();
@@ -176,7 +190,14 @@ struct Stream {
 };
 }
 bool tc_rom_uart_owned(){return exclusive;}
-void tc_rom_uart_capabilities(bool protocol,bool uart8){capable=protocol&&uart8;}
+void tc_rom_uart_capabilities(bool protocol,bool uart8,bool spi){
+    capable=protocol&&uart8;
+#ifdef TC_ROM_SPI
+    spi_capable=capable&&spi;
+#else
+    (void)spi;
+#endif
+}
 bool tc_rom_uart_capable(){return capable;}
 bool tc_rom_uart_load_snes(FIL &file,std::uint32_t off,std::uint32_t bytes,const std::uint8_t *header){
     if(!capable||!header||!bytes||(bytes&1)||bytes>0x7e0000||!prepare_dma()||!drained())return false;
@@ -201,12 +222,26 @@ bool tc_rom_uart_load_snes(FIL &file,std::uint32_t off,std::uint32_t bytes,const
     if(success)success=session.link_rate(8000000);
     if(success){delay(6);success=set_rate(8000000)&&session.link_sync();}
     if(success)success=session.negotiate_window();
+#ifdef TC_ROM_SPI
+    if(success && spi_capable){
+        success=tc_spi_open();
+        spi_stream=success;
+#ifdef TC_LAUNCH_TRACE
+        if(success)tc_launch_record.spi_hz=tc_spi_data_hz;
+#endif
+    }
+#endif
     if(success){
         tc_rom_measure_prepare();tc_rom_measure_begin(TcRomMeasurePhase::Data);
+        tc_launch_mark(TcLaunchEvent::DataBegin);
         success=session.stream({&source,Stream::read,Stream::pump});tc_rom_measure_end();
+        tc_launch_mark(TcLaunchEvent::DataEnd);
     }
+#ifdef TC_ROM_SPI
+    if(spi_stream){tc_spi_close();spi_stream=false;}
+#endif
     if(success)tc_launch_mark(TcLaunchEvent::RomQueued);
-    if(success){end_started=true;tc_rom_measure_begin(TcRomMeasurePhase::End);success=session.finish();tc_rom_measure_end();}
+    if(success){end_started=true;tc_rom_measure_begin(TcRomMeasurePhase::End);tc_launch_mark(TcLaunchEvent::EndBegin);success=session.finish();tc_rom_measure_end();tc_launch_mark(TcLaunchEvent::EndEnd);}
 #ifdef TC_LAUNCH_TRACE
     if(success&&tc_launch_record.active)tc_launch_record.end_ack_us=tc_launch_clock()-tc_launch_record.origin_us;
 #endif

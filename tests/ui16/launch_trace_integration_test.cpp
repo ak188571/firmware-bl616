@@ -12,7 +12,7 @@ struct Fake {
     static bool find(const char *,std::string &path,void *){now+=10;path="core.bin";return true;}
     static bool notice(void *){now+=500000;return true;}
     static void owner(bool,void *){}
-    static bool program(const char *,void *p){now+=3000000;return static_cast<Fake*>(p)->failure!=2;}
+    static bool program(const char *,bool,void *p){now+=3000000;return static_cast<Fake*>(p)->failure!=2;}
     static bool ready(int,void *){now+=20;return true;}
     static bool osd(void *){now+=30;return true;}
     static bool load(int,const char *,void *p){now+=100;return static_cast<Fake*>(p)->failure!=3;}

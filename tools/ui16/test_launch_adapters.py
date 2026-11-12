@@ -19,6 +19,7 @@ code=r'''
 #include <cstring>
 #include "ui16_crt.h"
 #include "ui16_launch.h"
+#include "tc_transition_trace.h"
 #include "tc_snes_sd_guard.h"
 using SemaphoreHandle_t=int;
 constexpr int pdTRUE=1,portMAX_DELAY=-1;
@@ -41,7 +42,8 @@ uint16_t joy1_state=0xffff,joy2_state=0xffff;
 int f_stat(const char *,FILINFO *p){p->fattrib=directory?AM_DIR:0;return file_result;}
 bool find_core_for_board(std::string &p,const char *n){p=std::string("sd:cores/")+n;return true;}
 bool core_running=true,gba_bios_loaded=true,gba_missing_bios_warned=true;int active_core=1,_overlay_on=1;
-bool fpga_program(const char *){return program_ok;}
+static bool short_wait_requested=false;
+bool fpga_program(const char *,bool short_wait){short_wait_requested=short_wait;return program_ok;}
 static uint64_t now=0;static int id=1,requests=0;
 uint64_t bflb_mtimer_get_time_ms(){return now;}
 void delay(unsigned ms){now+=ms;}
@@ -133,8 +135,8 @@ int main(){
  assert(ui16_hw_file_ready("sd:a.nes",nullptr));directory=true;assert(!ui16_hw_file_ready("x",nullptr));directory=false;
  file_result=1;assert(!ui16_hw_file_ready("x",nullptr));file_result=0;
  std::string path;assert(ui16_hw_find_core("nestang.bin",path,nullptr)&&path=="sd:cores/nestang.bin");
- assert(ui16_hw_program("x",nullptr));assert(!core_running&&active_core==-1&&!gba_bios_loaded&&!gba_missing_bios_warned&&_overlay_on==1&&joy1_state==0&&joy2_state==0);
- program_ok=false;assert(!ui16_hw_program("x",nullptr));program_ok=true;
+ assert(ui16_hw_program("x",true,nullptr));assert(short_wait_requested&&!core_running&&active_core==-1&&!gba_bios_loaded&&!gba_missing_bios_warned&&_overlay_on==1&&joy1_state==0&&joy2_state==0);
+ program_ok=false;assert(!ui16_hw_program("x",false,nullptr));assert(!short_wait_requested);program_ok=true;
  id=1;assert(ui16_hw_wait_core(1,nullptr)&&active_core==1);
  now=0;requests=0;id=2;assert(!ui16_hw_wait_core(1,nullptr)&&now>=2000&&requests<=10);
  started=true;result=0;assert(ui16_hw_load_rom(1,"sd:nes/a.nes",nullptr)&&!overlay_on());
@@ -307,6 +309,7 @@ branch=source[source.index('        // Keep the configured order;'):source.index
 syntax=r'''
 #include "ui16_browser.h"
 #include "ui16_launch.h"
+#include "tc_transition_trace.h"
 #include "menu_manager.h"
 #include "ui16_osd_menu.h"
 #include "ui16_system_osd.h"
@@ -320,7 +323,7 @@ extern std::vector<int16_t> main_menu_config;extern const char *drv;
 core_info *find_core_by_id(int);
 bool ui16_hw_file_ready(const char *,void *);
 bool ui16_hw_find_core(const char *,std::string &,void *);
-bool ui16_hw_program(const char *,void *);
+bool ui16_hw_program(const char *,bool,void *);
 bool ui16_hw_wait_core(int,void *);
 bool ui16_hw_load_rom(int,const char *,void *);
 void ui16_hw_display_owner(bool,void *);
@@ -345,10 +348,10 @@ extern Ui16GameOsd game_osd_owner;
 void delay(unsigned);
 void get_joypad_states(uint16_t *,uint16_t *,uint16_t *,uint16_t *);
 unsigned long long bflb_mtimer_get_time_ms();
-void ui16_wait_release();void ui16_restore_menu(Ui16Runtime &,Ui16Browser &);void send_hid_to_core();
+void ui16_wait_release();void ui16_restore_menu(Ui16Runtime &,Ui16Browser &,bool);void send_hid_to_core();
 Menu *create_default_menu(const char *);
 void run_ui16_main(){
 '''+branch+'\n}\n'
 path=build/'launch_main_syntax.cpp';path.write_text(syntax,encoding='utf-8',newline='\n')
-subprocess.run(['g++',*extra,'-DUI16_SYSTEM_MENU','-std=c++17','-Wall','-Wextra','-Werror','-Wno-unused-parameter','-pedantic','-fsyntax-only','-I'+str(ROOT/'ui'),str(path)],check=True)
+subprocess.run(['g++',*extra,'-DUI16_SYSTEM_MENU','-std=c++17','-Wall','-Wextra','-Werror','-Wno-unused-parameter','-pedantic','-fsyntax-only','-I'+str(ROOT/'ui'),'-I'+str(ROOT/'utils'),str(path)],check=True)
 print('Actual UI16 main-task branch syntax passed')

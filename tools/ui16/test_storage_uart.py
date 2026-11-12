@@ -18,7 +18,7 @@ extern "C" {
 using SemaphoreHandle_t=int;
 static bool rom_owned=false,rom_capable=false;
 bool tc_rom_uart_owned(){return rom_owned;}
-void tc_rom_uart_capabilities(bool protocol,bool uart8){rom_capable=protocol&&uart8;}
+void tc_rom_uart_capabilities(bool protocol,bool uart8,bool){rom_capable=protocol&&uart8;}
 constexpr int pdTRUE=1,portMAX_DELAY=-1;
 #define pdMS_TO_TICKS(n) (n)
 static bool core_running=false,retire_on_lease=false;
