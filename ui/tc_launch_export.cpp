@@ -94,6 +94,22 @@ bool tc_launch_export(const char *rom,int core_id,FIL &file,void *buffer,UINT ca
 #endif
         const auto &boot=transition.boot;
         const auto &attempt=transition.short_boot;
+        const auto &reload=transition.reload_timings;
+        if (reload.seen) {
+            text.add("%c_reload_timing_version=1\n%c_reload_timing_seen=%u\n%c_reload_timing_stored=%u\n%c_reload_timing_dropped=%u\n",
+                prefix,prefix,reload.seen,prefix,reload.stored,prefix,reload.seen-reload.stored);
+            text.add("%c_reload_timing_fields=short_wait,tap_reset_us,reload_cmd_us,noop_cmd_us,idle_state_us,idle_clocks_us,wait_start_gap_us,pre_wait_us,wait_loop_us,wait_complete,wait_ok\n",prefix);
+            for (unsigned i=0;i<reload.stored;++i) {
+                const auto &r=reload.attempts[i];
+                text.add("%c_reload_timing_%02u=%u",prefix,i+1,unsigned(r.short_wait));
+                for (unsigned j=0;j<static_cast<unsigned>(TcReloadBoundary::Count);++j)
+                    text.add(",%llu",static_cast<unsigned long long>(r.duration(j)));
+                const auto pre_wait=r.end_us[static_cast<unsigned>(TcReloadBoundary::WaitStart)];
+                text.add(",%llu,%llu,%u,%u\n",static_cast<unsigned long long>(pre_wait),
+                    static_cast<unsigned long long>(r.wait_complete ? r.wait_end_us-pre_wait : 0),
+                    unsigned(r.wait_complete),unsigned(r.wait_ok));
+            }
+        }
         if (attempt.attempted) {
             text.add("%c_short_boot_attempt=1\n%c_short_boot_reload=%u\n%c_short_boot_accepted=%u\n%c_short_boot_program=%u\n%c_short_boot_configured=%u\n",
                      prefix,prefix,unsigned(attempt.reload_started),prefix,unsigned(attempt.wait_accepted),

@@ -973,11 +973,27 @@ void fpgaStatus() {
     overlay_status("Status=%08x, User=%08x", readStatusReg(), readUserCode());
 }
 
-void fpgaReset() {
+void fpgaReset(
+#ifdef TC_LAUNCH_TRACE
+    TcReloadTiming *timing=nullptr
+#endif
+) {
 	send_command(RELOAD);
+#ifdef TC_LAUNCH_TRACE
+    if (timing) timing->mark(TcReloadBoundary::ReloadCommand,tc_launch_now_us());
+#endif
 	send_command(NOOP);    
+#ifdef TC_LAUNCH_TRACE
+    if (timing) timing->mark(TcReloadBoundary::NoopCommand,tc_launch_now_us());
+#endif
     set_state(RUN_TEST_IDLE);
+#ifdef TC_LAUNCH_TRACE
+    if (timing) timing->mark(TcReloadBoundary::IdleState,tc_launch_now_us());
+#endif
     jtag_toggleClk(1000000);
+#ifdef TC_LAUNCH_TRACE
+    if (timing) timing->mark(TcReloadBoundary::IdleClocks,tc_launch_now_us());
+#endif
 }
 
 void enable_jtag_pins(void) {
@@ -1192,17 +1208,25 @@ struct RecoveryPort {
     bool reload() {
         TcTransitionSection measured(TcTransitionStep::Reload);
 #ifdef TC_LAUNCH_TRACE
+        TcReloadTiming *timing=nullptr;
         auto *observation=tc_transition_active ? &tc_transition_active->boot : nullptr;
         if (observation) {
             *observation={};
             observation->start_us=tc_launch_now_us();
+            timing=tc_transition_active->reload_timings.begin(short_wait,observation->start_us);
         }
         if (short_trace) short_trace->reload_started=true;
 #endif
         go_test_logic_reset();
+#ifdef TC_LAUNCH_TRACE
+        if (timing) timing->mark(TcReloadBoundary::TapReset,tc_launch_now_us());
+        fpgaReset(timing);
+#else
         fpgaReset();
+#endif
         const uint64_t wait_start=bflb_mtimer_get_time_us();
 #ifdef TC_LAUNCH_TRACE
+        if (timing) timing->mark(TcReloadBoundary::WaitStart,wait_start);
         if (observation) observation->idle_end_us=tc_launch_now_us()-observation->start_us;
 #endif
         // Clear the legacy logo once the known boot image is identified.
@@ -1290,6 +1314,11 @@ struct RecoveryPort {
         }
 #ifdef TC_LAUNCH_TRACE
         if (observation) observation->end_us=tc_launch_now_us()-observation->start_us;
+        if (timing) {
+            timing->wait_end_us=observation->end_us;
+            timing->wait_complete=true;
+            timing->wait_ok=!short_wait || accepted;
+        }
         if (short_trace) {
             short_trace->wait_accepted=accepted;
             short_trace->wait_end_us=static_cast<uint32_t>(bflb_mtimer_get_time_us()-wait_start);

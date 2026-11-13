@@ -12,6 +12,40 @@ enum class TcTransitionStep : unsigned {
     Settings, InputRelease, FontReset, Redraw, Count
 };
 #ifdef TC_LAUNCH_TRACE
+// RAM-only boundaries, relative to RecoveryPort::reload's existing start_us.
+// Five extra timer reads per stored attempt; none inside the clock train.
+enum class TcReloadBoundary : unsigned {
+    TapReset, ReloadCommand, NoopCommand, IdleState, IdleClocks, WaitStart, Count
+};
+struct TcReloadTiming {
+    std::uint64_t start_us=0;
+    std::uint64_t end_us[static_cast<unsigned>(TcReloadBoundary::Count)]{};
+    std::uint64_t wait_end_us=0;
+    bool short_wait=false, wait_complete=false, wait_ok=false;
+
+    void mark(TcReloadBoundary boundary, std::uint64_t now_us) {
+        end_us[static_cast<unsigned>(boundary)]=now_us-start_us;
+    }
+    std::uint64_t duration(unsigned index) const {
+        return end_us[index]-(index ? end_us[index-1] : 0);
+    }
+};
+struct TcReloadTimings {
+    // Retain the first attempt and its automatic full-wait retry. Later manual
+    // retries are counted, never allowed to overwrite either retained record.
+    static constexpr unsigned Capacity=2;
+    unsigned seen=0, stored=0;
+    TcReloadTiming attempts[Capacity]{};
+
+    TcReloadTiming *begin(bool short_wait, std::uint64_t start_us) {
+        ++seen;
+        if (stored==Capacity) return nullptr;
+        auto &attempt=attempts[stored++];
+        attempt.short_wait=short_wait;
+        attempt.start_us=start_us;
+        return &attempt;
+    }
+};
 // Elapsed microseconds from the start of RELOAD. Zero means unobserved.
 struct TcBootObservation {
     std::uint64_t start_us=0, idle_end_us=0, first_match_us=0, third_match_us=0;
@@ -68,6 +102,7 @@ struct TcTransitionRecord {
 #ifdef TC_LAUNCH_TRACE
     TcBootObservation boot;
     TcShortBootTrace short_boot;
+    TcReloadTimings reload_timings;
 #endif
     std::uint64_t origin_us=0, wall_us=0;
     std::uint64_t section_us[static_cast<unsigned>(TcTransitionStep::Count)]{};
