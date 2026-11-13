@@ -973,9 +973,32 @@ void fpgaStatus() {
     overlay_status("Status=%08x, User=%08x", readStatusReg(), readUserCode());
 }
 
-void fpgaReset(
+#ifdef TANG_CONSOLE138K
+// Comparison build: keep all 1,000,000 pulses, hoist the SDK GPIO work
+// out of the repeated portion. The first pulse retains SDK pad validation.
+static void jtag_reload_idle_clocks_fast() {
+    const unsigned char tms=(TEST_LOGIC_RESET==_state) ? 1 : 0;
+    flushTMS(false);
+    if (tms) GPIO_PIN_JTAG_TMS_H(); else GPIO_PIN_JTAG_TMS_L();
+    GPIO_PIN_JTAG_TDI_L();
+    const uintptr_t bank=(GPIO_PIN_JTAG_TCK >> 5) << 2;
+    const uintptr_t clear_addr=gpio_dev->reg_base + GLB_GPIO_CFG140_OFFSET + bank;
+    const uintptr_t set_addr=gpio_dev->reg_base + GLB_GPIO_CFG138_OFFSET + bank;
+    const uint32_t mask=uint32_t(1) << (GPIO_PIN_JTAG_TCK & 31);
+    bflb_gpio_reset(gpio_dev,GPIO_PIN_JTAG_TCK);
+    bflb_gpio_set(gpio_dev,GPIO_PIN_JTAG_TCK);
+    for (uint32_t i=1; i<1000000; ++i) {
+        putreg32(mask,clear_addr);
+        putreg32(mask,set_addr);
+    }
+    _curr_tms=tms;
+    _curr_tdi=0;
+}
+#endif
+
+void fpgaReset(bool fast_idle=false
 #ifdef TC_LAUNCH_TRACE
-    TcReloadTiming *timing=nullptr
+    , TcReloadTiming *timing=nullptr
 #endif
 ) {
 	send_command(RELOAD);
@@ -989,6 +1012,10 @@ void fpgaReset(
     set_state(RUN_TEST_IDLE);
 #ifdef TC_LAUNCH_TRACE
     if (timing) timing->mark(TcReloadBoundary::IdleState,tc_launch_now_us());
+#endif
+#ifdef TANG_CONSOLE138K
+    if (fast_idle) jtag_reload_idle_clocks_fast();
+    else
 #endif
     jtag_toggleClk(1000000);
 #ifdef TC_LAUNCH_TRACE
@@ -1220,9 +1247,9 @@ struct RecoveryPort {
         go_test_logic_reset();
 #ifdef TC_LAUNCH_TRACE
         if (timing) timing->mark(TcReloadBoundary::TapReset,tc_launch_now_us());
-        fpgaReset(timing);
+        fpgaReset(short_wait,timing);
 #else
-        fpgaReset();
+        fpgaReset(short_wait);
 #endif
         const uint64_t wait_start=bflb_mtimer_get_time_us();
 #ifdef TC_LAUNCH_TRACE
