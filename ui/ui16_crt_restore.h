@@ -2,6 +2,9 @@
 #include "ui16_rom_id.h"
 #include "ui16_crt_settings.h"
 
+// Version 2 is reserved by the deployed unknown-schema compatibility fixtures.
+constexpr unsigned UI16_CRT_EXT_RECORD=3;
+
 enum class Ui16CrtReadState { NoId, Missing, User, Reset, Recovered, Bad, Io, Future, Conflict };
 struct Ui16CrtRestore {
     Ui16CrtReadState state=Ui16CrtReadState::NoId;

@@ -7,7 +7,7 @@
 
 bool ui16_save_crt_override(const Ui16RomIdentity &id,const Ui16CrtSettings &value,
                            FIL &file,void *buffer,UINT capacity,bool reset){
-    if(value.blur>3||value.scanline>3)return false;
+    if(!value.valid())return false;
     // Re-read before EVERY attempt. A previous failed sync/close/verification
     // may have produced a valid new generation; protect that generation too.
     const auto current=ui16_read_crt_override(id,file,buffer,capacity);
@@ -19,7 +19,14 @@ bool ui16_save_crt_override(const Ui16RomIdentity &id,const Ui16CrtSettings &val
     record[0]='C';record[1]='R';record[2]='T';record[3]='1';record[4]=1;record[5]=static_cast<unsigned char>(id.system);record[6]=reset?1:0;
     const auto put=[&](unsigned at,std::uint64_t v,unsigned n){for(unsigned i=0;i<n;++i)record[at+i]=static_cast<unsigned char>(v>>(8*i));};
     put(8,id.crc,4);put(12,id.size,8);
-    record[20]=reset?0:static_cast<unsigned char>(unsigned(value.enabled)|(value.blur<<1)|(value.scanline<<3));
+    // Keep legacy-only values and RESET readable by older firmware. The extension
+    // represents a USER record; its widths and flags share the same CRC and slot.
+    const auto flags=value.flags();
+    if(!reset && ((flags & ~31u) || value.widths!=Ui16CrtSettings{}.widths)){
+        record[4]=UI16_CRT_EXT_RECORD;
+        put(6,flags,2);
+        std::copy(value.widths.begin(),value.widths.end(),record.begin()+20);
+    }else record[20]=reset?0:static_cast<unsigned char>(flags);
     put(24,generation,4);put(28,ui16_rom_crc(0xffffffffu,record.data(),28)^0xffffffffu,4);
     char directory[12],path[64];
     std::snprintf(directory,sizeof(directory),"%s/crt",id.volume==Ui16RomVolume::Sd?"sd:":"usb:");

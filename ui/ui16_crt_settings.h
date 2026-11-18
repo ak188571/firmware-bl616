@@ -1,14 +1,33 @@
 #pragma once
 #include <cstdint>
+#include <array>
 #include <string_view>
 
 struct Ui16CrtSettings {
     bool enabled=false;
     unsigned blur=0,scanline=0;
-    std::uint32_t merge(std::uint32_t config)const {
-        return (config&~0x001f0000u)|(std::uint32_t(enabled)<<16)|((blur&3u)<<17)|((scanline&3u)<<19);
+    bool beam=false;
+    unsigned mask=0,gamma=0,temperature=0;
+    bool vignette=false,rounded=false,overscan=false,bleed=false;
+    std::array<std::uint8_t,4> widths{}; // top, bottom, left, right, in output pixels
+
+    bool valid() const {return blur<4 && scanline<4 && mask<3 && gamma<3 && temperature<3;}
+    std::uint16_t flags() const {
+        return enabled | (blur<<1) | (scanline<<3) | (beam<<5) | (mask<<6) |
+               (gamma<<8) | (temperature<<10) | (vignette<<12) | (rounded<<13) |
+               (overscan<<14) | (bleed<<15);
     }
-    bool operator==(const Ui16CrtSettings &v)const{return enabled==v.enabled&&blur==v.blur&&scanline==v.scanline;}
+    static Ui16CrtSettings from_flags(unsigned bits) {
+        Ui16CrtSettings v{bool(bits&1), (bits>>1)&3, (bits>>3)&3};
+        v.beam=bits&0x20; v.mask=(bits>>6)&3; v.gamma=(bits>>8)&3; v.temperature=(bits>>10)&3;
+        v.vignette=bits&0x1000; v.rounded=bits&0x2000; v.overscan=bits&0x4000; v.bleed=bits&0x8000;
+        return v;
+    }
+    std::uint32_t merge(std::uint32_t config,bool extended=false)const {
+        const std::uint32_t mask=extended?0xffff0000u:0x001f0000u;
+        return (config&~mask)|((std::uint32_t(flags())<<16)&mask);
+    }
+    bool operator==(const Ui16CrtSettings &v)const{return flags()==v.flags() && widths==v.widths;}
     bool operator!=(const Ui16CrtSettings &v)const{return !(*this==v);}
 };
 struct Ui16CrtRecommendation {bool present=false;Ui16CrtSettings settings;};

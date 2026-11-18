@@ -53,6 +53,7 @@ std::uint64_t tc_launch_now_us(){return bflb_mtimer_get_time_us();}
 #include "ui16_rom_id_reader.h"
 #include "ui16_crt_restore_reader.h"
 #include "ui16_crt_save.h"
+#include "ui16_crt_widths.h"
 #include "ui16_crt_defaults_reader.h"
 #include "tc_snes_sd_guard.h"
 #ifdef UI16_SD_FONT
@@ -835,6 +836,8 @@ static void main_task(void *pvParameters)
                     // Preserve normal game input; the UI button assignment is not a game remap.
                     ui16_wait_release();
                     if(crt_stage1_capable){
+                        ui16_crt_set_width_sender(crt_scanline_capable && (request.core_id==1 || request.core_id==2)
+                                                  ? ui16_send_crt_widths : nullptr);
                         if(request.core_id==2){
                             if(snes_crt_sd_session)ui16_crt_snes_session(request.crt_recommendation,crt_rom_identity,crt_restore,ui16_hw_save_crt,crt_defaults);
                             else ui16_crt_preview_session(); // USB ROM storage stays volatile in S4a.

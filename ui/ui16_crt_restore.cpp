@@ -24,9 +24,12 @@ Read read_record(const char *path,const Ui16RomIdentity &id,FIL &file,void *buff
     std::copy_n(static_cast<unsigned char *>(buffer),32,record.begin());
     if(record[0]!='C'||record[1]!='R'||record[2]!='T'||record[3]!='1'||
        (ui16_rom_crc(0xffffffffu,record.data(),28)^0xffffffffu)!=number(record,28,4))return Read::Bad;
-    if(record[4]!=1)return Read::Future;
-    if(record[5]!=id.system||record[6]>1||record[7]||record[20]>31||record[21]||record[22]||record[23]||
-       (record[6]==1&&record[20])||number(record,8,4)!=id.crc||number(record,12,8)!=id.size)return Read::Bad;
+    if(record[4]!=1 && record[4]!=UI16_CRT_EXT_RECORD)return Read::Future;
+    if(record[5]!=id.system||number(record,8,4)!=id.crc||number(record,12,8)!=id.size)return Read::Bad;
+    if(record[4]==1){
+        if(record[6]>1||record[7]||record[20]>31||record[21]||record[22]||record[23]||
+           (record[6]==1&&record[20]))return Read::Bad;
+    }else if(!Ui16CrtSettings::from_flags(number(record,6,2)).valid())return Read::Bad;
     return Read::Valid;
 }
 }
@@ -55,11 +58,15 @@ Ui16CrtRestore ui16_read_crt_override(const Ui16RomIdentity &id,FIL &file,void *
     }
     const bool bad=states[0]==Read::Bad||states[1]==Read::Bad;
     if(best<0){result.state=bad?Ui16CrtReadState::Bad:Ui16CrtReadState::Missing;return result;}
-    const auto &r=records[best];const bool user=r[6]==0;
+    const auto &r=records[best];const bool user=r[4]==UI16_CRT_EXT_RECORD || r[6]==0;
     result.selected_slot=best;
     result.generation=static_cast<std::uint32_t>(number(r,24,4));
     result.state=bad?Ui16CrtReadState::Recovered:user?Ui16CrtReadState::User:Ui16CrtReadState::Reset;
-    if(user)result.override_value={true,{bool(r[20]&1),unsigned((r[20]>>1)&3),unsigned((r[20]>>3)&3)}};
+    if(user){
+        auto value=Ui16CrtSettings::from_flags(r[4]==1?r[20]:number(r,6,2));
+        if(r[4]==UI16_CRT_EXT_RECORD)std::copy_n(r.begin()+20,4,value.widths.begin());
+        result.override_value={true,value};
+    }
     return result;
 }
 

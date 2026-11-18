@@ -48,6 +48,18 @@ static Ui16CrtRestore read(const Ui16RomIdentity &identity=id){
 }
 static void setup(){assert(!active);files.clear();paths.clear();open_error=read_error=close_error="";closes=0;early=oversize=false;}
 int main(){
+    for(unsigned bits=0;bits<32;++bits){
+        setup();files[prefix+".a"]=record(1,0,bits);
+        auto legacy=read();
+        assert(legacy.state==Ui16CrtReadState::User && legacy.override_value.present);
+        const auto &settings=legacy.override_value.settings;
+        assert(settings.flags()==bits && settings.widths==Ui16CrtSettings{}.widths);
+    }
+    for(unsigned shift:{6u,8u,10u}){
+        setup();auto malformed=record();
+        malformed[4]=UI16_CRT_EXT_RECORD;put(malformed,6,3u<<shift,2);crc(malformed);
+        files[prefix+".a"]=malformed;assert(read().state==Ui16CrtReadState::Bad);
+    }
     setup();assert(read().state==Ui16CrtReadState::Missing&&paths.size()==2);
     files[prefix+".a"]=record();auto restored=read();
     assert(restored.state==Ui16CrtReadState::User&&restored.override_value.present&&restored.override_value.settings==Ui16CrtSettings({true,3,3}));
