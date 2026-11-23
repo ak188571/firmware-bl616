@@ -46,6 +46,7 @@ void overlay_cursor(int col, int row) {
     taskEXIT_CRITICAL();
 }
 
+#ifndef TC_NORMAL_BUILD
 // print to UART without the core displaying it. liveuart.py catches this.
 void dprint(const char *fmt, ...) {
     va_list args;
@@ -62,6 +63,8 @@ void dprint(const char *fmt, ...) {
     }
     taskEXIT_CRITICAL();
 }
+
+#endif
 
 void overlay_printf(const char *fmt, ...) {
     va_list args;

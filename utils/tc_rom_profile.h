@@ -15,6 +15,14 @@ struct Profile {
     void (*enter)(void *,Activity,std::size_t)=nullptr;
     void (*leave)(void *,Activity)=nullptr;
 };
+#ifdef TC_NORMAL_BUILD
+class ProfileScope {
+public:
+    ProfileScope(Profile *, Activity, std::size_t = 0, bool = true) {}
+    void start() {}
+    void stop() {}
+};
+#else
 class ProfileScope {
 public:
     ProfileScope(Profile *p,Activity a,std::size_t units=0,bool begin=true):p_(p),a_(a),units_(units){if(begin)start();}
@@ -26,4 +34,5 @@ public:
 private:
     Profile *p_;Activity a_;std::size_t units_;bool on_=false;
 };
+#endif
 }

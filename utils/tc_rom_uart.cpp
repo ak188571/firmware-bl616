@@ -39,16 +39,27 @@ bflb_device_s *dma=nullptr;
 std::uint32_t session_counter=0;
 std::uint8_t reply_window[25]{};
 unsigned reply_used=0;
+#ifndef TC_NORMAL_BUILD
 bool reply_counted=false,reply_first_poll=true;
-void reset_reply_parser(){reply_used=0;reply_counted=false;reply_first_poll=true;}
+#endif
+void reset_reply_parser(){
+    reply_used=0;
+#ifndef TC_NORMAL_BUILD
+    reply_counted=false;reply_first_poll=true;
+#endif
+}
 bool poll_frame(void *,std::uint8_t *reply,std::size_t *reply_size){
     if(*reply_size<25||!tc_rom_uart_rx_pending())return false;
     TcRom::ProfileScope processing(tc_rom_measure_observer(),TcRom::Activity::AckProcess);
+#ifndef TC_NORMAL_BUILD
     if(!reply_counted){tc_rom_measure_ack_begin();reply_counted=true;reply_first_poll=true;}
+#endif
     for(unsigned budget=0;budget<128;++budget){
         std::uint8_t byte=0;const int got=tc_rom_uart_rx_take(&byte);
+#ifndef TC_NORMAL_BUILD
         if(reply_first_poll||!got)tc_rom_measure_ack_poll(got,reply_first_poll);
         reply_first_poll=false;
+#endif
         if(got<0){reply_used=0;continue;}if(!got)return false;
         if(reply_used==sizeof reply_window){std::memmove(reply_window,reply_window+1,sizeof reply_window-1);--reply_used;}
         reply_window[reply_used++]=byte;
@@ -130,11 +141,15 @@ bool receive_frame(void *,std::uint8_t *reply,std::size_t *reply_size,std::uint3
     TcRom::ProfileScope processing(tc_rom_measure_observer(),TcRom::Activity::AckProcess);
     TcRom::ProfileScope waiting(tc_rom_measure_observer(),TcRom::Activity::AckWait,0,false);
     if(*reply_size<25)return false;
+#ifndef TC_NORMAL_BUILD
     if(!reply_counted){tc_rom_measure_ack_begin();reply_counted=true;reply_first_poll=true;}
+#endif
     const auto start=bflb_mtimer_get_time_ms();
     while(bflb_mtimer_get_time_ms()-start<timeout){
         if(poll_frame(nullptr,reply,reply_size)){waiting.stop();return true;}
+#ifndef TC_NORMAL_BUILD
         tc_rom_measure_ack_poll(0,reply_first_poll);reply_first_poll=false;waiting.start();
+#endif
     }
     return false;
 }

@@ -53,7 +53,9 @@ bool Session::request(Op op,const std::uint8_t *data,std::uint16_t count,std::ui
     if(!size)return false;
     const auto expected=offset_+(op==Op::Data?count:0);
     for(unsigned attempt=0;attempt<4;++attempt){
+#ifndef TC_NORMAL_BUILD
         ++stats_.requests;if(attempt)++stats_.retries;
+#endif
         std::uint8_t reply[Overhead+1]{};std::size_t reply_size=sizeof reply;
         if(!transport_.exchange(transport_.context,storage_,size,reply,&reply_size,timeout,pump,context))continue;
         View answer;
@@ -80,9 +82,15 @@ bool Session::stream(Source source){
         if(!source.read(source.context,offset_,storage_+20,wanted,&n)||!n||n>wanted)return false;}
         if(!request(Op::Data,storage_+20,n,50,source.pump,source.context))return false;
         {ProfileScope timing(transport_.profile,Activity::StreamCrc,n);crc_=crc_update(crc_,storage_+20,n);}
-        offset_+=n;++sequence_;++stats_.blocks;stats_.bytes+=n;
+        offset_+=n;++sequence_;
+#ifndef TC_NORMAL_BUILD
+        ++stats_.blocks;stats_.bytes+=n;
+#endif
     }
-    stats_.crc=crc_^0xffffffffu;return true;
+#ifndef TC_NORMAL_BUILD
+    stats_.crc=crc_^0xffffffffu;
+#endif
+    return true;
 }
 bool Session::finish(){
     if(!begun_||offset_!=total_||verified_)return false;
@@ -107,7 +115,9 @@ bool Session::negotiate_window(){
     if(!transport_.send||!transport_.receive||capacity_<2*MaxFrame)return true;
     std::uint8_t body[4];put32(body,2);
     window_two_=request(Op::Window,body,4);
+#ifndef TC_NORMAL_BUILD
     stats_.window=window_two_?2:1;
+#endif
     // An old ROMXFR1 core explicitly rejects the extension. Silence, a backend
     // failure or any other error must not be mistaken for old-core support.
     return window_two_||last_status_==Status::Format;
@@ -119,7 +129,10 @@ bool Session::stream_window(Source source){
     auto queued=offset_;auto seq=sequence_;
     auto send=[&](unsigned i){
         auto &s=slots[i];if(s.attempts==4)return false;
-        ++stats_.requests;if(s.attempts++)++stats_.retries;
+#ifndef TC_NORMAL_BUILD
+        ++stats_.requests;if(s.attempts)++stats_.retries;
+#endif
+        ++s.attempts;
         // Failure can leave a partial frame. Retry after the receive timeout;
         // framing/CRC and the receiver's inter-byte timeout reject the prefix.
         return transport_.send(transport_.context,storage_+i*MaxFrame,Overhead+s.n,50,source.pump,source.context);
@@ -155,7 +168,10 @@ bool Session::stream_window(Source source){
         while(used&&slots[head].ack){
             const auto &s=slots[head];
             {ProfileScope timing(transport_.profile,Activity::StreamCrc,s.n);crc_=crc_update(crc_,storage_+head*MaxFrame+20,s.n);}
-            offset_+=s.n;++sequence_;++stats_.blocks;stats_.bytes+=s.n;
+            offset_+=s.n;++sequence_;
+#ifndef TC_NORMAL_BUILD
+            ++stats_.blocks;stats_.bytes+=s.n;
+#endif
             head^=1;--used;
         }
         if(retry){
@@ -167,7 +183,10 @@ bool Session::stream_window(Source source){
             }
         }
     }
-    stats_.crc=crc_^0xffffffffu;return true;
+#ifndef TC_NORMAL_BUILD
+    stats_.crc=crc_^0xffffffffu;
+#endif
+    return true;
 }
 }
 
@@ -201,7 +220,9 @@ struct Session::Pipeline {
             if(!slot.digest){
                 ProfileScope timing(s.transport_.profile,Activity::StreamCrc,slot.n);
                 slot.after=crc_update(crc,frame(i)+20,slot.n);slot.digest=true;
+#ifndef TC_NORMAL_BUILD
                 if(pinned>=0)++s.stats_.crc_in_send;
+#endif
             }
             crc=slot.after;
         }
@@ -210,7 +231,10 @@ struct Session::Pipeline {
         // Even an early ACK cannot release the DMA/physical transmitter's slot.
         while(used&&slots[head].state==Sent&&slots[head].ack&&slots[head].digest&&int(head)!=pinned){
             const auto &slot=slots[head];s.crc_=slot.after;s.offset_+=slot.n;
-            ++s.sequence_;++s.stats_.blocks;s.stats_.bytes+=slot.n;
+            ++s.sequence_;
+#ifndef TC_NORMAL_BUILD
+            ++s.stats_.blocks;s.stats_.bytes+=slot.n;
+#endif
             slots[head]={};head^=1;--used;
         }
         if(!unacked())recovery=false;
@@ -223,7 +247,9 @@ struct Session::Pipeline {
             if(slot.state!=Sent||answer.sequence!=slot.seq)continue;
             const auto status=static_cast<Status>(answer.data[0]);
             if(status==Status::Ok&&answer.offset==slot.at+slot.n){
+#ifndef TC_NORMAL_BUILD
                 if(!slot.ack&&pinned>=0)++s.stats_.acks_in_send;
+#endif
                 slot.ack=true;
             }else if(status==Status::Busy||status==Status::Order)recovery=true;
             else if(status!=Status::Ok)fatal=true;
@@ -249,13 +275,19 @@ struct Session::Pipeline {
         if(!source.read(source.context,queued,frame(i)+20,wanted,&n)||!n||n>wanted){fatal=true;return false;}}
         if(!encode(frame(i),MaxFrame,{Request,Op::Data,s.id_,seq,queued,frame(i)+20,n},s.transport_.profile)){fatal=true;return false;}
         slot={};slot.state=Prepared;slot.at=queued;slot.seq=seq;slot.n=n;
-        queued+=n;++seq;++used;if(pinned>=0)++s.stats_.prepared_in_send;
+        queued+=n;++seq;++used;
+#ifndef TC_NORMAL_BUILD
+        if(pinned>=0)++s.stats_.prepared_in_send;
+#endif
         return true;
     }
     static void pump(void *context){static_cast<Pipeline*>(context)->tick();}
     void tick(){
         if(in_pump||fatal)return;
-        in_pump=true;++s.stats_.pumps;
+        in_pump=true;
+#ifndef TC_NORMAL_BUILD
+        ++s.stats_.pumps;
+#endif
         drain();digests();commit();
         if(!fatal&&!recovery&&!retrying){
             if(source.pump)source.pump(source.context);
@@ -269,14 +301,19 @@ struct Session::Pipeline {
     }
     bool send(unsigned i){
         auto &slot=slots[i];if(slot.attempts==4){fatal=true;return false;}
-        ++s.stats_.requests;if(slot.attempts++)++s.stats_.retries;
+#ifndef TC_NORMAL_BUILD
+        ++s.stats_.requests;if(slot.attempts)++s.stats_.retries;
+#endif
+        ++slot.attempts;
         slot.state=Sent;pinned=int(i);
         const bool ok=s.transport_.send(s.transport_.context,frame(i),Overhead+slot.n,50,pump,this);
         pinned=-1;if(!ok)recovery=true;
         digests();commit();return ok;
     }
     bool run(){
+#ifndef TC_NORMAL_BUILD
         s.stats_.pipeline=1;
+#endif
         if(!prepare())return false; // The UART source's first block is its header.
         while(s.offset_<s.total_){
             if(fatal)return false;
@@ -302,7 +339,10 @@ struct Session::Pipeline {
             for(unsigned k=0;k<count&&!fatal;++k){const unsigned i=retry[k];if(slots[i].state==Sent&&!slots[i].ack)send(i);}
             retrying=false;
         }
-        s.stats_.crc=s.crc_^0xffffffffu;return !fatal;
+#ifndef TC_NORMAL_BUILD
+        s.stats_.crc=s.crc_^0xffffffffu;
+#endif
+        return !fatal;
     }
 };
 bool Session::stream_pipeline(Source source){Pipeline pipeline(*this,source);return pipeline.run();}

@@ -21,12 +21,12 @@ struct core_info *find_core_by_id(uint16_t id) {
 }
 
 Menu *create_default_menu(const char *imgdir) {
-    dprint("Creating default menu\n");
+    TC_DEBUG_PRINT("Creating default menu\n");
     return new DefaultMenu();
 }
 
 Menu *create_pcxt_menu(const char *imgdir) {
-    dprint("Creating PCXT menu\n");
+    TC_DEBUG_PRINT("Creating PCXT menu\n");
     return new PcxtMenu(imgdir);
 }
 

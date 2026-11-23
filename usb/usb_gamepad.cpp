@@ -15,9 +15,6 @@
 
 #include <string>
 
-// Uncomment this to enable on-screen debug messages
-// #define DEBUG_ON
-
 #define MAX_REPORT_SIZE   8
 #define XBOX_REPORT_SIZE 20
 
@@ -77,15 +74,10 @@ USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX uint8_t xbox_buffer[CONFIG_USBHOST_MAX_XB
 // them individually
 static uint8_t joystick_map = 0;
 
-#define DEBUG_ON
 
 void overlay_status(const char *fmt, ...);
 #define INFO(fmt, ...) overlay_status(fmt, ##__VA_ARGS__)
-#ifdef DEBUG_ON
-#define DEBUG(fmt, ...) dprint(fmt, ##__VA_ARGS__)
-#else
-#define DEBUG(fmt, ...) do {} while(0)
-#endif
+#define DEBUG(...) TC_DEBUG_PRINT(__VA_ARGS__)
 
 uint8_t hid_allocate_joystick(void) {
     uint8_t idx;
@@ -128,7 +120,9 @@ void usbh_xbox_callback(void *arg, int nbytes) {
     DEBUG("subclass %d, ", cls->hport->config.intf[i].altsetting[0].intf_desc.bInterfaceSubClass); \
     DEBUG("protocol %d\n", cls->hport->config.intf[i].altsetting[0].intf_desc.bInterfaceProtocol);
 
+#ifndef TC_NORMAL_BUILD
 uint8_t joy_driver_map = 0;
+#endif
 
 static void usbh_update(struct usb_config *usb) {
     // check status for tasks
@@ -153,11 +147,13 @@ static void usbh_update(struct usb_config *usb) {
     for(int i=0; i<CONFIG_USBHOST_MAX_HID_CLASS; i++) {
         std::string dev = "/dev/input"+std::to_string(i);
         usb->hid_info[i].hid_class = (struct usbh_hid *)usbh_find_class_instance(dev.c_str());
+#ifndef TC_NORMAL_BUILD
         if (usb->hid_info[i].hid_class) {
             joy_driver_map |= (1 << i);
         } else {
             joy_driver_map &= ~(1 << i);
         }
+#endif
         
         if(usb->hid_info[i].hid_class && usb->hid_info[i].state == STATE_NONE) {
             INFO("HID %d connected\n", i);
@@ -199,11 +195,13 @@ static void usbh_update(struct usb_config *usb) {
     for(int i=0;i<CONFIG_USBHOST_MAX_XBOX_CLASS;i++) {
         std::string dev = "/dev/xbox"+std::to_string(i);
         usb->xbox_info[i].hid_class = (struct usbh_hid *)usbh_find_class_instance(dev.c_str());
+#ifndef TC_NORMAL_BUILD
         if (usb->xbox_info[i].hid_class) {
             joy_driver_map |= (1 << (i + 2));
         } else {
             joy_driver_map &= ~(1 << (i + 2));
         }
+#endif
         
         if(usb->xbox_info[i].hid_class && usb->xbox_info[i].state == STATE_NONE) {
             INFO("Xinput %d connected\n", i);
@@ -398,12 +396,18 @@ static void usbh_xbox_client_thread(void *arg) {
             xbox->hid_class->intin, xbox->buffer, XBOX_REPORT_SIZE,
             50, usbh_xbox_callback, xbox);
 
+#ifndef TC_NORMAL_BUILD
     int total = 0, error = 0;
+#endif
     while(1) {
         int ret = usbh_submit_urb(&xbox->hid_class->intin_urb);
+#ifndef TC_NORMAL_BUILD
         total++;
+#endif
         if (ret < 0) {
+#ifndef TC_NORMAL_BUILD
             error++;
+#endif
             INFO("XBOX client #%d: submit failed %d\n", xbox->index, ret);
         } else {
             xSemaphoreTake(xbox->sem, 0xffffffffUL);    // Wait for result
@@ -424,7 +428,9 @@ static void usbh_xbox_client_thread(void *arg) {
                     xSemaphoreGive(state_mutex);
                 }
             } else {
+#ifndef TC_NORMAL_BUILD
                 error++;
+#endif
                 if (xbox->nbytes == -USB_ERR_TIMEOUT) {
                     INFO("XBOX client #%d: timeout, reinit\n", xbox->index);
                     usbh_kill_urb(&xbox->hid_class->intin_urb);
@@ -434,14 +440,16 @@ static void usbh_xbox_client_thread(void *arg) {
             }
             xbox->nbytes = 0;
         }
+#ifndef TC_NORMAL_BUILD
         if (total % 1000 == 0) {
             DEBUG("XBOX client #%d: total %d, error %d\n", xbox->index, total, error);
         }
+#endif
         vTaskDelay(pdMS_TO_TICKS(4));
     }
 }
 
-#ifdef DEBUG_ON
+#ifndef TC_NORMAL_BUILD
 static const char *state2str(int state) {
     switch (state) {
         case STATE_NONE: return "none";
@@ -455,7 +463,9 @@ static const char *state2str(int state) {
 
 static void usbh_hid_thread(void *argument) {
     DEBUG("Starting usb gamepad host task...");
+#ifndef TC_NORMAL_BUILD
     uint64_t last_status = 0;
+#endif
 
     struct usb_config *usb = (struct usb_config *)argument;
 
@@ -500,6 +510,7 @@ static void usbh_hid_thread(void *argument) {
             }
         }
 
+#ifndef TC_NORMAL_BUILD
         uint64_t now = bflb_mtimer_get_time_ms();
         if (now - last_status > 5000) {
             last_status = now;
@@ -510,6 +521,7 @@ static void usbh_hid_thread(void *argument) {
                 joy_driver_map & 8 ? "on" : "off", state2str(usb->xbox_info[1].state)
             );
         }
+#endif
 
         // wait for 100ms as this thread only deals with device detection and leaving
         vTaskDelay(pdMS_TO_TICKS(100));

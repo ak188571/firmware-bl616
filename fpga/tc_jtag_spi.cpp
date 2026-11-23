@@ -119,7 +119,9 @@ bool send_dma(const std::uint8_t *data,std::size_t size){
     if(!fifo_empty() || (getreg32(DmaBase+DMA_RAWINTTCSTATUS_OFFSET)&Channels)!=Channels)
         return fail(TcJtagSpiError::Incomplete);
     last_tdi=data[size-1]&1;
+#ifndef TC_NORMAL_BUILD
     stats.dma_bytes+=size;++stats.dma_blocks;
+#endif
     return true;
 }
 }
@@ -188,7 +190,11 @@ bool tc_jtag_spi_send(const std::uint8_t *data,std::size_t size,bool last){
             drive(1,false);drive(3,(data[size-1]>>bit)&1);drive(0,bit==0);
             bflb_mtimer_delay_us(1);drive(1,true);bflb_mtimer_delay_us(1);
         }
-        last_tdi=data[size-1]&1;++stats.gpio_bytes;finished=true;
+        last_tdi=data[size-1]&1;
+#ifndef TC_NORMAL_BUILD
+        ++stats.gpio_bytes;
+#endif
+        finished=true;
     }
     return true;
 }

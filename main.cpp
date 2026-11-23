@@ -246,7 +246,7 @@ static void send_hid_to_core(void) {
 #ifdef UI16_SYSTEM_MENU
     bool osd_chord_release=false;
 #endif
-    dprint("Start sending HID to core...");
+    TC_DEBUG_PRINT("Start sending HID to core...");
     while (1) {
         uint16_t joy1=0, joy2=0, hid1=0, hid2=0;
         get_joypad_states(&joy1, &joy2, &hid1, &hid2);
@@ -294,7 +294,7 @@ static void send_hid_to_core(void) {
 #endif
         vTaskDelay(pdMS_TO_TICKS(10));
     }
-    dprint("Stopped sending HID to core.");
+    TC_DEBUG_PRINT("Stopped sending HID to core.");
 }
 
 // // (R L X A RT LT DN UP START SELECT Y B)
@@ -707,11 +707,11 @@ static void ui16_restore_menu(Ui16Runtime &runtime,Ui16Browser &browser,bool try
         if(short_wait && error==Ui16LaunchError::MonitorProgramFailed){
             // A second attempt performs a fresh RELOAD and full five-second wait.
             overlay_status("RETRY: FULL 5S WAIT");
-            dprint("UI16 restore: automatic full-wait retry\n");
+            TC_DEBUG_PRINT("UI16 restore: automatic full-wait retry\n");
             continue;
         }
         overlay_status("%s; A/B retry",ui16_launch_error_text(error));
-        dprint("UI16 restore: %s\n",ui16_launch_error_text(error));
+        TC_DEBUG_PRINT("UI16 restore: %s\n",ui16_launch_error_text(error));
         overlay_status("%s; RELEASE BUTTONS",ui16_launch_error_text(error));
         ui16_wait_release();
         overlay_status("%s; PRESS A/B",ui16_launch_error_text(error));
@@ -903,7 +903,7 @@ static void main_task(void *pvParameters)
                             (request.relative_path.empty()?"":"/"+request.relative_path)+"/"+request.filename;
                         char log_path[32]{};
                         const bool saved=tc_launch_export(measured.c_str(),request.core_id,fcore,fbuf,BLOCK_SIZE,log_path,sizeof(log_path));
-                        dprint("UART baseline: %s %s\n",saved?"saved":"FAILED",log_path);
+                        TC_DEBUG_PRINT("UART baseline: %s %s\n",saved?"saved":"FAILED",log_path);
                     }
                 }
 #endif

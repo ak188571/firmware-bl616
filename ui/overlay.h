@@ -3,7 +3,12 @@
 extern int _overlay_on;
 extern int overlay_on();
 extern void overlay_cursor(int x, int y);
+#ifdef TC_NORMAL_BUILD
+#define TC_DEBUG_PRINT(...) ((void)0)
+#else
 extern void dprint(const char *fmt, ...);
+#define TC_DEBUG_PRINT(...) dprint(__VA_ARGS__)
+#endif
 extern void overlay_printf(const char *fmt, ...);
 extern void overlay_clear();
 extern void overlay_clear_logo();

@@ -61,7 +61,9 @@ public:
     bool link_rate(std::uint32_t baud);
     bool link_sync();
     void abort();
+#ifndef TC_NORMAL_BUILD
     const Stats &stats()const{return stats_;}
+#endif
 private:
     bool request(Op,const std::uint8_t *,std::uint16_t,std::uint32_t timeout=50,
                  void (*pump)(void *)=nullptr,void *pump_context=nullptr,bool any_offset=false);
@@ -75,6 +77,8 @@ private:
     std::uint8_t *storage_;
     std::size_t capacity_;
     bool begun_=false,verified_=false,running_=false;
+#ifndef TC_NORMAL_BUILD
     Stats stats_{};
+#endif
 };
 }

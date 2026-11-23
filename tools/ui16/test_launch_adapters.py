@@ -17,6 +17,7 @@ code=r'''
 #include <cassert>
 #include <cstdio>
 #include <cstring>
+#include "overlay.h"
 #include "ui16_crt.h"
 #include "ui16_launch.h"
 #include "tc_transition_trace.h"
@@ -315,6 +316,7 @@ syntax=r'''
 #include "menu_manager.h"
 #include "ui16_osd_menu.h"
 #include "ui16_system_osd.h"
+#include "overlay.h"
 #include "ui16_crt.h"
 #include <cstdint>
 #include <memory>
