@@ -14,6 +14,8 @@ constexpr unsigned UI16_CRT_GLOW_RECORD=4;
 constexpr unsigned UI16_CRT_SIGNAL_RECORD=5;
 // Same packed profile as schema 5 with curvature enabled. Older readers protect unknown slots.
 constexpr unsigned UI16_CRT_CURVE_RECORD=6;
+// Schema 7 implies convergence. Byte 5 bit 7 independently stores curvature.
+constexpr unsigned UI16_CRT_CONVERGENCE_RECORD=7;
 constexpr unsigned UI16_CRT_SIGNAL_SYSTEM_MASK=3;
 
 enum class Ui16CrtReadState { NoId, Missing, User, Reset, Recovered, Bad, Io, Future, Conflict };

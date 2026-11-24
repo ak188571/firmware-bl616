@@ -187,6 +187,28 @@ int main(int argc,char **argv){
     menu=launch(b);choose(*menu,5);choose(*menu,4);
     menu=launch(b);expect(0);choose(*menu,0);line(*menu,9,"CURVATURE OFF");
     std::printf("PASS system %u: curvature capability, frame ACK, ROM-specific schema 6, cancel/reset and old-core bit ownership\n",system);
+    ui16_crt_set_width_sender(ui16_send_crt_widths,true,true,true);
+    menu=launch(b);choose(*menu,0);line(*menu,10,"CONVERGENCE OFF");
+    change(*menu,10);assert(config & Ui16CrtSettings::ConvergenceBit);
+    assert(menu->on_close());expect(0);
+    menu=launch(b);change(*menu,1);choose(*menu,0);change(*menu,10);
+    const auto converged=config;
+    menu->on_info(0x0008);ui16_crt_accept_status(converged^Ui16CrtSettings::ConvergenceBit);
+    menu->on_tick(20);line(*menu,14,"WAITING");
+    ui16_crt_accept_status(converged);menu->on_tick(21);line(*menu,14,"FRAME ACK");
+    menu->on_info(0x0008);choose(*menu,0);choose(*menu,0);choose(*menu,4);line(*menu,4,"SAVE OK");
+    menu=launch(a);expect(19);menu=launch(b);assert(config==converged);
+    choose(*menu,0);line(*menu,9,"CURVATURE OFF");line(*menu,10,"CONVERGENCE ON");
+    change(*menu,9);choose(*menu,0);choose(*menu,0);choose(*menu,4);
+    menu=launch(b);assert(config==(converged|Ui16CrtSettings::CurveBit));
+    choose(*menu,0);change(*menu,10);choose(*menu,0);choose(*menu,0);choose(*menu,4);
+    menu=launch(b);choose(*menu,0);line(*menu,9,"CURVATURE ON");line(*menu,10,"CONVERGENCE OFF");
+    ui16_crt_set_width_sender(ui16_send_crt_widths,true,true);
+    config|=Ui16CrtSettings::ConvergenceBit;menu=launch(a);choose(*menu,0);
+    assert((config & Ui16CrtSettings::ConvergenceBit) && menu->get_options().back()==9 && !menu->on_adjust(10,1));
+    ui16_crt_set_width_sender(ui16_send_crt_widths,true,true,true);
+    menu=launch(b);choose(*menu,5);choose(*menu,4);menu=launch(b);expect(0);
+    std::printf("PASS system %u: convergence row, frame ACK, ROM-specific save with curvature OFF/ON, legacy restore, cancel/reset and previous-core gating\n",system);
     std::printf("PASS system %u: independent RGB/Composite controls, shared Glow, legacy RGB, per-ROM v5 save/reload, cancel, reset and preview navigation\n",system);
     std::printf("PASS system %u: Glow toggle and frame ACK, old-core gating, schema 1/3/4 ROM A/B reload, cancel/reset\n",system);
 }

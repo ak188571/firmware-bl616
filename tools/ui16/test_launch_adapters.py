@@ -31,9 +31,9 @@ int xSemaphoreTake(int,int){if(!lease_available)return 0;assert(storage_depth==0
 void xSemaphoreGive(int){assert(storage_depth==1);storage_depth--;}
 bool tc_snes_sd_scope(bool value){const bool old=sd_scope;sd_scope=value;return old;}
 bool tc_snes_sd_faulted(){return sd_fault;}
-static bool crt_stage1_capable=false,restart_capable=false,crt_scanline_capable=true,crt_glow_capable=false,crt_curve_capable=false;
+static bool crt_stage1_capable=false,restart_capable=false,crt_scanline_capable=true,crt_glow_capable=false,crt_curve_capable=false,crt_convergence_capable=false;
 void ui16_send_crt_widths(const std::array<std::uint8_t,4> &){}
-void ui16_crt_set_width_sender(Ui16CrtWidthsFn,bool,bool){}
+void ui16_crt_set_width_sender(Ui16CrtWidthsFn,bool,bool,bool){}
 static Ui16GameOsd game_osd_owner=Ui16GameOsd::System;
 using std::uint16_t;using std::uint64_t;
 struct FILINFO {unsigned char fattrib=0;unsigned fsize=100;};
@@ -347,7 +347,7 @@ extern Ui16RomIdentity crt_rom_identity;
 extern Ui16CrtRestore crt_restore;
 extern Ui16CrtDefaults crt_defaults;
 bool ui16_hw_save_crt(const Ui16RomIdentity &,const Ui16CrtSettings &,bool);
-static bool crt_blur_capable=false,crt_scanline_capable=false,crt_glow_capable=false,crt_curve_capable=false;
+static bool crt_blur_capable=false,crt_scanline_capable=false,crt_glow_capable=false,crt_curve_capable=false,crt_convergence_capable=false;
 void ui16_send_crt_widths(const std::array<std::uint8_t,4> &);
 extern Ui16GameOsd game_osd_owner;
 void delay(unsigned);

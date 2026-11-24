@@ -7,7 +7,7 @@
 
 bool ui16_save_crt_override(const Ui16RomIdentity &id,const Ui16CrtSettings &value,
                            FIL &file,void *buffer,UINT capacity,bool reset){
-    const bool signal=!reset && (value.curvature || value.needs_signal_record());
+    const bool signal=!reset && (value.convergence || value.curvature || value.needs_signal_record());
     if(!value.valid() || (signal && id.system!=1 && id.system!=2))return false;
     // Re-read before EVERY attempt. A previous failed sync/close/verification
     // may have produced a valid new generation; protect that generation too.
@@ -26,9 +26,10 @@ bool ui16_save_crt_override(const Ui16RomIdentity &id,const Ui16CrtSettings &val
     if(!reset && (signal || value.glow || (flags & ~31u) || value.widths!=Ui16CrtSettings{}.widths)){
         record[4]=value.glow?UI16_CRT_GLOW_RECORD:UI16_CRT_EXT_RECORD;
         if(signal){
-            record[4]=value.curvature?UI16_CRT_CURVE_RECORD:UI16_CRT_SIGNAL_RECORD;
+            record[4]=value.convergence?UI16_CRT_CONVERGENCE_RECORD:value.curvature?UI16_CRT_CURVE_RECORD:UI16_CRT_SIGNAL_RECORD;
             record[5]=id.system | (unsigned(value.composite)<<2) | (value.composite_blur<<3) |
                       (unsigned(value.composite_bleed)<<5) | (unsigned(value.glow)<<6);
+            if(value.convergence && value.curvature)record[5]|=0x80;
         }
         put(6,flags,2);
         std::copy(value.widths.begin(),value.widths.end(),record.begin()+20);

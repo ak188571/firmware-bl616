@@ -532,7 +532,7 @@ int main(){
     }
     // Exercise the real input loop through all three pages. SAVE must still
     // resolve to the selected action after the page changes its option count.
-    ui16_crt_set_width_sender([](const std::array<std::uint8_t,4>&){},true,true);
+    ui16_crt_set_width_sender([](const std::array<std::uint8_t,4>&){},true,true,true);
     for(unsigned system:{1u,2u}){
         auto id=rom_id;id.system=system;
         if(system==2)ui16_crt_snes_session({},id,{},save_test,{});
@@ -545,7 +545,8 @@ int main(){
         for(int row=2;row<8;++row)press(0x20);
         press(0x80); // GLOW -> ON
         press(0x20);press(0x01); // CURVATURE -> ON
-        for(int row=9;row>0;--row)press(0x10);
+        press(0x20);press(0x01); // CONVERGENCE -> ON
+        for(int row=10;row>0;--row)press(0x10);
         press(0x01); // PAGE -> OVERSCAN
         press(0x20);press(0x80);press(0x20);press(0x80); // enable and set top width
         press(0x10);press(0x10);press(0x80); // PAGE -> MAIN
@@ -558,6 +559,7 @@ int main(){
         ui16_osd_menu_input_loop(false,"CRT SETTINGS",true);
         assert(!overlay_on()&&saves==previously_saved+1&&saved_value.flags()==0x4041&&saved_value.glow&&saved_value.composite);
         assert((config>>16)==0xc043 && saved_value.curvature && (config & Ui16CrtSettings::CurveBit));
+        assert(saved_value.convergence && (config & Ui16CrtSettings::ConvergenceBit));
         bool saw_signal=false;
         for(const auto &view:snapshots)
             saw_signal |= visible(view,0,0,32,28).find("SIGNAL COMPOSITE")!=std::string::npos;
@@ -566,10 +568,14 @@ int main(){
         for(const auto &view:snapshots)
             saw_curve |= visible(view,0,0,32,28).find("CURVATURE ON")!=std::string::npos;
         assert(saw_curve);
+        bool saw_convergence=false;
+        for(const auto &view:snapshots)
+            saw_convergence |= visible(view,0,0,32,28).find("CONVERGENCE ON")!=std::string::npos;
+        assert(saw_convergence);
         assert((saved_value.widths==std::array<std::uint8_t,4>{1,0,0,0}));
         menu_clear();
     }
-    std::puts("Extended OSD2 controller input PASS: three pages, Glow with controller, confirm, SAVE and close on both systems");
+    std::puts("Extended OSD2 controller input PASS: Glow, curvature and convergence, confirm, SAVE and close on both systems");
     std::puts("Load info PASS: source/read-state snapshots survive USER/Reset SAVE, all states fit existing frame, NES/SNES");
     std::puts("CRT host PASS: hotkeys, preserved config, frame ACK/retry, stale ACK rejection, CSV/default/explicit OFF seeds, invalid seed fallback, explicit SAVE/stay-open/retry and X/Y discard of live preview");
     std::puts("Compact OSD2 PASS: NES/SNES all 32 settings and 5 positions, hidden diagnostics, SAVE status, START hold/combinations, preserved selection, visible window and exact shrink-back");
