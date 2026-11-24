@@ -12,6 +12,8 @@ constexpr unsigned UI16_CRT_GLOW_RECORD=4;
 // bleed in bit 5 and shared Glow in bit 6. Bit 7 is reserved. Flags in 6:7
 // keep both RGB controls; widths and the full ROM key/generation are unchanged.
 constexpr unsigned UI16_CRT_SIGNAL_RECORD=5;
+// Same packed profile as schema 5 with curvature enabled. Older readers protect unknown slots.
+constexpr unsigned UI16_CRT_CURVE_RECORD=6;
 constexpr unsigned UI16_CRT_SIGNAL_SYSTEM_MASK=3;
 
 enum class Ui16CrtReadState { NoId, Missing, User, Reset, Recovered, Bad, Io, Future, Conflict };

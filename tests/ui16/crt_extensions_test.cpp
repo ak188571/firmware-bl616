@@ -161,6 +161,32 @@ int main(int argc,char **argv){
     menu.reset(ui16_create_crt_menu(true,true));
     assert(menu->get_options().back()==6 && menu->get_options().size()==5);
     choose(*menu,4);line(*menu,6,"SIGNAL COMPOSITE");
+    ui16_crt_set_width_sender(ui16_send_crt_widths,true,true);
+    menu=launch(a);choose(*menu,0);line(*menu,9,"CURVATURE OFF");expect(19);
+    change(*menu,9);line(*menu,9,"CURVATURE ON");
+    assert(config==(19u<<16 | Ui16CrtSettings::CurveBit | 0x123u));
+    assert(menu->on_close());expect(19);
+    menu=launch(b);choose(*menu,1);choose(*menu,6);choose(*menu,0);
+    change(*menu,8);change(*menu,9);
+    const auto curved=config;assert((curved & 0xc000u)==0xc000u);
+    menu->on_info(0x0008);ui16_crt_accept_status(curved^Ui16CrtSettings::CurveBit);
+    menu->on_tick(10);line(*menu,13,"WAITING");
+    ui16_crt_accept_status(curved);menu->on_tick(11);line(*menu,13,"FRAME ACK");
+    menu->on_info(0x0008);choose(*menu,0);choose(*menu,0);
+    choose(*menu,4);line(*menu,4,"SAVE OK");
+    menu=launch(a);expect(19);menu=launch(b);assert(config==curved);
+    line(*menu,6,"SIGNAL COMPOSITE");choose(*menu,0);line(*menu,9,"CURVATURE ON");
+    change(*menu,9);assert(menu->on_close() && config==curved);
+    ui16_crt_set_width_sender(ui16_send_crt_widths,true,false);
+    config&=~Ui16CrtSettings::CurveBit;menu=launch(b);
+    assert(!(config & Ui16CrtSettings::CurveBit));choose(*menu,0);
+    assert(menu->get_options().back()==8 && !menu->on_adjust(9,1));
+    config|=Ui16CrtSettings::CurveBit;menu=launch(a);
+    assert(config & Ui16CrtSettings::CurveBit); // Old core owns this bit.
+    ui16_crt_set_width_sender(ui16_send_crt_widths,true,true);
+    menu=launch(b);choose(*menu,5);choose(*menu,4);
+    menu=launch(b);expect(0);choose(*menu,0);line(*menu,9,"CURVATURE OFF");
+    std::printf("PASS system %u: curvature capability, frame ACK, ROM-specific schema 6, cancel/reset and old-core bit ownership\n",system);
     std::printf("PASS system %u: independent RGB/Composite controls, shared Glow, legacy RGB, per-ROM v5 save/reload, cancel, reset and preview navigation\n",system);
     std::printf("PASS system %u: Glow toggle and frame ACK, old-core gating, schema 1/3/4 ROM A/B reload, cancel/reset\n",system);
 }
