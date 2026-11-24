@@ -4,6 +4,8 @@
 
 // Version 2 is reserved by the deployed unknown-schema compatibility fixtures.
 constexpr unsigned UI16_CRT_EXT_RECORD=3;
+// Same payload as schema 3; schema 4 identifies a USER record with Glow enabled.
+constexpr unsigned UI16_CRT_GLOW_RECORD=4;
 
 enum class Ui16CrtReadState { NoId, Missing, User, Reset, Recovered, Bad, Io, Future, Conflict };
 struct Ui16CrtRestore {

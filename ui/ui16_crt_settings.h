@@ -11,6 +11,9 @@ struct Ui16CrtSettings {
     bool vignette=false,rounded=false,overscan=false,bleed=false;
     std::array<std::uint8_t,4> widths{}; // top, bottom, left, right, in output pixels
 
+    bool glow=false;
+    static constexpr std::uint32_t GlowBit=1u<<15;
+
     bool valid() const {return blur<4 && scanline<4 && mask<3 && gamma<3 && temperature<3;}
     std::uint16_t flags() const {
         return enabled | (blur<<1) | (scanline<<3) | (beam<<5) | (mask<<6) |
@@ -23,11 +26,12 @@ struct Ui16CrtSettings {
         v.vignette=bits&0x1000; v.rounded=bits&0x2000; v.overscan=bits&0x4000; v.bleed=bits&0x8000;
         return v;
     }
-    std::uint32_t merge(std::uint32_t config,bool extended=false)const {
+    std::uint32_t merge(std::uint32_t config,bool extended=false,bool supports_glow=false)const {
         const std::uint32_t mask=extended?0xffff0000u:0x001f0000u;
+        if(supports_glow)config=(config&~GlowBit)|(glow?GlowBit:0u);
         return (config&~mask)|((std::uint32_t(flags())<<16)&mask);
     }
-    bool operator==(const Ui16CrtSettings &v)const{return flags()==v.flags() && widths==v.widths;}
+    bool operator==(const Ui16CrtSettings &v)const{return flags()==v.flags() && widths==v.widths && glow==v.glow;}
     bool operator!=(const Ui16CrtSettings &v)const{return !(*this==v);}
 };
 struct Ui16CrtRecommendation {bool present=false;Ui16CrtSettings settings;};

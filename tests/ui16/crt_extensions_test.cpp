@@ -62,8 +62,8 @@ static void line(Menu &m,int row,const char *value){
     const auto &cells=ui16_osd_canvas().cells;
     assert(std::string(cells.data()+row*32,32).find(value)!=std::string::npos);
 }
-static void expect(unsigned flags,std::array<std::uint8_t,4> widths={}){
-    assert(config==((std::uint32_t(flags)<<16)|0x0123u) && transmitted==widths);
+static void expect(unsigned flags,std::array<std::uint8_t,4> widths={},bool glow=false){
+    assert(config==((std::uint32_t(flags)<<16)|0x0123u|(glow?0x8000u:0u)) && transmitted==widths);
 }
 static void change(Menu &m,int row,int delta=1){assert(m.on_adjust(row,delta));}
 static void choose(Menu &m,int row){assert(!m.on_choose(row));}
@@ -74,7 +74,13 @@ int main(int argc,char **argv){
     const auto a=ui16_identify_rom(system,"sd:/a.rom",file,buffer.data(),buffer.size());
     const auto b=ui16_identify_rom(system,"sd:/b.rom",file,buffer.data(),buffer.size());
     assert(a.valid&&b.valid&&!a.same_game(b));
+    // An older core owns its low half-word. It cannot select the new row.
+    config |= Ui16CrtSettings::GlowBit;
     ui16_crt_set_width_sender(ui16_send_crt_widths);
+    auto old_menu=launch(a);choose(*old_menu,0);
+    assert(old_menu->get_options().back()==7 && !old_menu->on_adjust(8,1));
+    assert(config & Ui16CrtSettings::GlowBit);
+    ui16_crt_set_width_sender(ui16_send_crt_widths,true);
     auto menu=launch(a);
     expect(19); // Schema 1, master ON, BLUR WEAK, SCAN STD.
     choose(*menu,0);line(*menu,0,"EFFECTS");
@@ -95,18 +101,29 @@ int main(int argc,char **argv){
     }
     // Visit both byte limits without disturbing another edge.
     change(*menu,2,-1);change(*menu,2,-1);widths[0]=255;expect(flags,widths);
-    choose(*menu,0);line(*menu,4,"SAVE *");choose(*menu,4);line(*menu,4,"SAVE OK");
+    choose(*menu,0);choose(*menu,0);line(*menu,8,"GLOW OFF");
+    change(*menu,8);line(*menu,8,"GLOW ON");expect(flags,widths,true);
+    assert(menu->get_options().back()==8);
+    menu->on_info(0x0008);
+    ui16_crt_accept_status(config ^ Ui16CrtSettings::GlowBit);
+    menu->on_tick(1);line(*menu,12,"WAITING");
+    ui16_crt_accept_status(config);
+    menu->on_tick(2);line(*menu,12,"FRAME ACK");
+    menu->on_info(0x0008);
+    change(*menu,8,-1);line(*menu,8,"GLOW OFF");expect(flags,widths);
+    change(*menu,8);expect(flags,widths,true);
+    choose(*menu,0);choose(*menu,0);line(*menu,4,"SAVE *");choose(*menu,4);line(*menu,4,"SAVE OK");
     menu=launch(b);expect(0);
     change(*menu,1);choose(*menu,0);change(*menu,3,-1);choose(*menu,0);
     change(*menu,5,-1);choose(*menu,0);choose(*menu,4);
     const std::array<std::uint8_t,4> bwidths{0,0,0,255};
     expect(0x201,bwidths); // Width saved even while Overscan is OFF.
-    menu=launch(a);expect(flags,widths);choose(*menu,0);line(*menu,2,"SHADOW MASK");
-    choose(*menu,0);line(*menu,2,"TOP 255 PX");change(*menu,2);assert(menu->on_close());expect(flags,widths);
+    menu=launch(a);expect(flags,widths,true);choose(*menu,0);line(*menu,2,"SHADOW MASK");
+    choose(*menu,0);line(*menu,2,"TOP 255 PX");change(*menu,2);assert(menu->on_close());expect(flags,widths,true);
     menu=launch(b);expect(0x201,bwidths);
     choose(*menu,5);expect(0);assert(menu->on_close());expect(0x201,bwidths);
     choose(*menu,5);choose(*menu,4);menu=launch(b);expect(0);
-    menu=launch(a);expect(flags,widths);
+    menu=launch(a);expect(flags,widths,true);
     // Simulate a torn upgrade: damaged newer slot must recover the untouched v1.
     char slot[80];std::snprintf(slot,sizeof slot,"crt/%02x-%08lx-%016llx.b",system,
         static_cast<unsigned long>(a.crc),static_cast<unsigned long long>(a.size));
@@ -114,5 +131,5 @@ int main(int argc,char **argv){
     menu=launch(a);expect(19);
     const auto recovered=ui16_read_crt_override(a,file,buffer.data(),buffer.size());
     assert(recovered.state==Ui16CrtReadState::Recovered && recovered.generation==7);
-    std::printf("PASS system %u: OSD2 controls, UART widths, v1 migration/recovery, ROM A/B reload, cancel/reset\n",system);
+    std::printf("PASS system %u: Glow toggle and frame ACK, old-core gating, schema 1/3/4 ROM A/B reload, cancel/reset\n",system);
 }

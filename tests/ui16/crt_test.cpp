@@ -532,7 +532,7 @@ int main(){
     }
     // Exercise the real input loop through all three pages. SAVE must still
     // resolve to the selected action after the page changes its option count.
-    ui16_crt_set_width_sender([](const std::array<std::uint8_t,4>&){});
+    ui16_crt_set_width_sender([](const std::array<std::uint8_t,4>&){},true);
     for(unsigned system:{1u,2u}){
         auto id=rom_id;id.system=system;
         if(system==2)ui16_crt_snes_session({},id,{},save_test,{});
@@ -542,7 +542,10 @@ int main(){
         const auto press=[](std::uint16_t button){pads.push_back(button);pads.push_back(0);};
         press(0x80); // MAIN -> EFFECTS
         press(0x20);press(0x20);press(0x80); // MASK -> APERTURE GRILLE
-        press(0x10);press(0x10);press(0x01); // PAGE -> OVERSCAN
+        for(int row=2;row<8;++row)press(0x20);
+        press(0x80); // GLOW -> ON
+        for(int row=8;row>0;--row)press(0x10);
+        press(0x01); // PAGE -> OVERSCAN
         press(0x20);press(0x80);press(0x20);press(0x80); // enable and set top width
         press(0x10);press(0x10);press(0x80); // PAGE -> MAIN
         press(0x20);press(0x80); // master CRT -> ON
@@ -550,11 +553,11 @@ int main(){
         press(0x200);
         const auto previously_saved=saves;
         ui16_osd_menu_input_loop(false,"CRT SETTINGS",true);
-        assert(!overlay_on()&&saves==previously_saved+1&&saved_value.flags()==0x4041);
+        assert(!overlay_on()&&saves==previously_saved+1&&saved_value.flags()==0x4041&&saved_value.glow);
         assert((saved_value.widths==std::array<std::uint8_t,4>{1,0,0,0}));
         menu_clear();
     }
-    std::puts("Extended OSD2 controller input PASS: three pages, confirm, SAVE and close on both systems");
+    std::puts("Extended OSD2 controller input PASS: three pages, Glow with controller, confirm, SAVE and close on both systems");
     std::puts("Load info PASS: source/read-state snapshots survive USER/Reset SAVE, all states fit existing frame, NES/SNES");
     std::puts("CRT host PASS: hotkeys, preserved config, frame ACK/retry, stale ACK rejection, CSV/default/explicit OFF seeds, invalid seed fallback, explicit SAVE/stay-open/retry and X/Y discard of live preview");
     std::puts("Compact OSD2 PASS: NES/SNES all 32 settings and 5 positions, hidden diagnostics, SAVE status, START hold/combinations, preserved selection, visible window and exact shrink-back");

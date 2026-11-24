@@ -23,11 +23,12 @@ volatile std::uint32_t applied_status=0;
 volatile bool status_seen=false;
 std::uint32_t last_send_ms=0;
 Ui16CrtWidthsFn send_widths=nullptr;
+bool glow_supported=false;
 void send_settings() {
     last_send_ms=static_cast<std::uint32_t>(bflb_mtimer_get_time_ms());
     taskENTER_CRITICAL();status_seen=false;taskEXIT_CRITICAL();
     if(send_widths)send_widths(settings.widths);
-    set_core_config(settings.merge(get_core_config(),send_widths!=nullptr));
+    set_core_config(settings.merge(get_core_config(),send_widths!=nullptr,glow_supported));
 }
 const char *strength(unsigned n) {
     static const char *const names[]={"OFF","WEAK","STD","STRONG"};
@@ -75,6 +76,7 @@ struct CrtMenu:Menu {
             overlay_cursor(0,y++);overlay_printf("VIGNETTE %s",settings.vignette?"ON":"OFF");
             overlay_cursor(0,y++);overlay_printf("CORNERS %s",settings.rounded?"ON":"OFF");
             overlay_cursor(0,y++);overlay_printf("CHROMA BLEED %s",settings.bleed?"ON":"OFF");
+            if(glow_supported){overlay_cursor(0,y++);overlay_printf("GLOW %s",settings.glow?"ON":"OFF");}
         }else{
             static const char *const edges[]={"TOP","BOTTOM","LEFT","RIGHT"};
             overlay_cursor(0,y++);overlay_printf("OVERSCAN %s",settings.overscan?"ON":"OFF");
@@ -94,7 +96,11 @@ struct CrtMenu:Menu {
         overlay_cursor(0,y);overlay_printf("RESET = RECOMMENDED");
     }
     std::vector<int> get_options()override{
-        if(page==Effects)return {0,1,2,3,4,5,6,7};
+        if(page==Effects){
+            std::vector<int> rows{0,1,2,3,4,5,6,7};
+            if(glow_supported)rows.push_back(8);
+            return rows;
+        }
         if(page==Crop)return {0,1,2,3,4,5};
         std::vector<int> rows;
         if(extended)rows.push_back(0);
@@ -118,6 +124,7 @@ struct CrtMenu:Menu {
             case 4: settings.vignette=!settings.vignette;break;
             case 5: settings.rounded=!settings.rounded;break;
             case 6: settings.bleed=!settings.bleed;break;
+            case 7: if(!glow_supported)return false;settings.glow=!settings.glow;break;
             default:return false;
             }
         }else if(page==Crop){
@@ -162,7 +169,7 @@ struct CrtMenu:Menu {
     bool on_tick(std::uint32_t now)override {
         bool seen;std::uint32_t value;
         taskENTER_CRITICAL();seen=status_seen;value=applied_status;taskEXIT_CRITICAL();
-        const bool next=seen&&((value^settings.merge(0,extended))&(extended?0xffff0000u:UI16_CRT_MASK))==0;
+        const bool next=seen && value==settings.merge(value,extended,glow_supported);
         const bool changed=next!=matched;matched=next;
         // Recover a lost setting packet instead of waiting indefinitely for a
         // value that was never received. Requests are idempotent and coalesce.
@@ -174,7 +181,9 @@ struct CrtMenu:Menu {
     }
 };
 }
-void ui16_crt_set_width_sender(Ui16CrtWidthsFn send){send_widths=send;}
+void ui16_crt_set_width_sender(Ui16CrtWidthsFn send,bool supports_glow){
+    send_widths=send;glow_supported=send && supports_glow;
+}
 void ui16_crt_new_session(const Ui16CrtRecommendation &recommended,const Ui16RomIdentity &rom_id,const Ui16CrtRestore &restore,Ui16CrtSaveFn save,const Ui16CrtDefaults &defaults){
     preview_only=false;read_only=false;
     identity=rom_id;save_callback=save;save_failed=false;

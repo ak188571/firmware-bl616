@@ -22,8 +22,8 @@ bool ui16_save_crt_override(const Ui16RomIdentity &id,const Ui16CrtSettings &val
     // Keep legacy-only values and RESET readable by older firmware. The extension
     // represents a USER record; its widths and flags share the same CRC and slot.
     const auto flags=value.flags();
-    if(!reset && ((flags & ~31u) || value.widths!=Ui16CrtSettings{}.widths)){
-        record[4]=UI16_CRT_EXT_RECORD;
+    if(!reset && (value.glow || (flags & ~31u) || value.widths!=Ui16CrtSettings{}.widths)){
+        record[4]=value.glow?UI16_CRT_GLOW_RECORD:UI16_CRT_EXT_RECORD;
         put(6,flags,2);
         std::copy(value.widths.begin(),value.widths.end(),record.begin()+20);
     }else record[20]=reset?0:static_cast<unsigned char>(flags);
