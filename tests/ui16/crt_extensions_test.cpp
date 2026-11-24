@@ -235,6 +235,27 @@ int main(int argc,char **argv){
     ui16_crt_set_width_sender(ui16_send_crt_widths,true,true,true,true);
     menu=launch(b);choose(*menu,5);choose(*menu,4);menu=launch(b);expect(0);
     std::printf("PASS system %u: NTSC signal cycling, per-ROM save, previous-core gating, cancel/reset\n",system);
+    ui16_crt_set_width_sender(ui16_send_crt_widths,true,true,true,true,true);
+    menu=launch(b);choose(*menu,1);choose(*menu,0);
+    line(*menu,11,"BLOOM OFF");change(*menu,11);line(*menu,11,"BLOOM ON");
+    assert(config & Ui16CrtSettings::BloomBit);
+    menu->on_info(0x0008);
+    ui16_crt_accept_status(config ^ Ui16CrtSettings::BloomBit);menu->on_tick(40);line(*menu,15,"WAITING");
+    ui16_crt_accept_status(config);menu->on_tick(41);line(*menu,15,"FRAME ACK");
+    menu->on_info(0x0008);
+    assert(menu->on_close());expect(0); // unsaved preview was discarded
+    menu=launch(b);choose(*menu,1);choose(*menu,0);change(*menu,11);
+    change(*menu,8);choose(*menu,0);choose(*menu,0);choose(*menu,4);line(*menu,4,"SAVE OK");
+    const auto saved_bloom=config;
+    menu=launch(a);expect(19);menu=launch(b);assert(config==saved_bloom);
+    choose(*menu,0);line(*menu,8,"GLOW ON");line(*menu,11,"BLOOM ON");
+    ui16_crt_set_width_sender(ui16_send_crt_widths,true,true,true,true);
+    config&=~Ui16CrtSettings::BloomBit;menu=launch(b);choose(*menu,0);
+    assert(menu->get_options().back()==10 && !menu->on_adjust(11,1) && !(config & Ui16CrtSettings::BloomBit));
+    config|=Ui16CrtSettings::BloomBit;menu=launch(a);assert(config & Ui16CrtSettings::BloomBit);
+    ui16_crt_set_width_sender(ui16_send_crt_widths,true,true,true,true,true);
+    menu=launch(b);choose(*menu,5);choose(*menu,4);menu=launch(b);expect(0);
+    std::printf("PASS system %u: Bloom, Glow independence, frame ACK, ROM save/restore, cancel, reset and old-core gating\n",system);
     std::printf("PASS system %u: independent RGB/Composite controls, shared Glow, legacy RGB, per-ROM v5 save/reload, cancel, reset and preview navigation\n",system);
     std::printf("PASS system %u: Glow toggle and frame ACK, old-core gating, schema 1/3/4 ROM A/B reload, cancel/reset\n",system);
 }

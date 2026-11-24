@@ -24,12 +24,14 @@ Read read_record(const char *path,const Ui16RomIdentity &id,FIL &file,void *buff
     std::copy_n(static_cast<unsigned char *>(buffer),32,record.begin());
     if(record[0]!='C'||record[1]!='R'||record[2]!='T'||record[3]!='1'||
        (ui16_rom_crc(0xffffffffu,record.data(),28)^0xffffffffu)!=number(record,28,4))return Read::Bad;
-    const bool signal=record[4]==UI16_CRT_SIGNAL_RECORD || record[4]==UI16_CRT_CURVE_RECORD || record[4]==UI16_CRT_CONVERGENCE_RECORD || record[4]==UI16_CRT_NTSC_RECORD;
-    if(!signal && record[4]!=1 && record[4]!=UI16_CRT_EXT_RECORD && record[4]!=UI16_CRT_GLOW_RECORD)return Read::Future;
+    const unsigned schema=record[4] & ~UI16_CRT_BLOOM_FLAG;
+    if(schema==1 && record[4]!=1)return Read::Future;
+    const bool signal=schema==UI16_CRT_SIGNAL_RECORD || schema==UI16_CRT_CURVE_RECORD || schema==UI16_CRT_CONVERGENCE_RECORD || schema==UI16_CRT_NTSC_RECORD;
+    if(!signal && schema!=1 && schema!=UI16_CRT_EXT_RECORD && schema!=UI16_CRT_GLOW_RECORD)return Read::Future;
     const unsigned system=signal?(record[5]&UI16_CRT_SIGNAL_SYSTEM_MASK):record[5];
-    if(signal && (((record[5]&0x80) && record[4]!=UI16_CRT_CONVERGENCE_RECORD && record[4]!=UI16_CRT_NTSC_RECORD) || (system!=1 && system!=2)))return Read::Bad;
+    if(signal && (((record[5]&0x80) && schema!=UI16_CRT_CONVERGENCE_RECORD && schema!=UI16_CRT_NTSC_RECORD) || (system!=1 && system!=2)))return Read::Bad;
     if(system!=id.system||number(record,8,4)!=id.crc||number(record,12,8)!=id.size)return Read::Bad;
-    if(record[4]==1){
+    if(schema==1){
         if(record[6]>1||record[7]||record[20]>31||record[21]||record[22]||record[23]||
            (record[6]==1&&record[20]))return Read::Bad;
     }else if(!Ui16CrtSettings::from_flags(number(record,6,2)).valid())return Read::Bad;
@@ -61,23 +63,25 @@ Ui16CrtRestore ui16_read_crt_override(const Ui16RomIdentity &id,FIL &file,void *
     }
     const bool bad=states[0]==Read::Bad||states[1]==Read::Bad;
     if(best<0){result.state=bad?Ui16CrtReadState::Bad:Ui16CrtReadState::Missing;return result;}
-    const auto &r=records[best];const bool user=r[4]!=1 || r[6]==0;
+    const auto &r=records[best];const unsigned schema=r[4] & ~UI16_CRT_BLOOM_FLAG;
+    const bool user=schema!=1 || r[6]==0;
     result.selected_slot=best;
     result.generation=static_cast<std::uint32_t>(number(r,24,4));
     result.state=bad?Ui16CrtReadState::Recovered:user?Ui16CrtReadState::User:Ui16CrtReadState::Reset;
     if(user){
-        auto value=Ui16CrtSettings::from_flags(r[4]==1?r[20]:number(r,6,2));
-        value.glow=r[4]==UI16_CRT_GLOW_RECORD;
-        value.ntsc=r[4]==UI16_CRT_NTSC_RECORD;
-        value.convergence=r[4]==UI16_CRT_CONVERGENCE_RECORD || (value.ntsc && (r[5]&4));
-        value.curvature=r[4]==UI16_CRT_CURVE_RECORD || ((value.ntsc || value.convergence) && (r[5]&0x80));
-        if(r[4]==UI16_CRT_SIGNAL_RECORD || value.curvature || value.convergence || value.ntsc){
+        auto value=Ui16CrtSettings::from_flags(schema==1?r[20]:number(r,6,2));
+        value.bloom=(r[4] & UI16_CRT_BLOOM_FLAG)!=0;
+        value.glow=schema==UI16_CRT_GLOW_RECORD;
+        value.ntsc=schema==UI16_CRT_NTSC_RECORD;
+        value.convergence=schema==UI16_CRT_CONVERGENCE_RECORD || (value.ntsc && (r[5]&4));
+        value.curvature=schema==UI16_CRT_CURVE_RECORD || ((value.ntsc || value.convergence) && (r[5]&0x80));
+        if(schema==UI16_CRT_SIGNAL_RECORD || value.curvature || value.convergence || value.ntsc){
             value.composite=value.ntsc || (r[5]&4)!=0;
             value.composite_blur=(r[5]>>3)&3;
             value.composite_bleed=(r[5]&32)!=0;
             value.glow=(r[5]&64)!=0;
         }
-        if(r[4]!=1)std::copy_n(r.begin()+20,4,value.widths.begin());
+        if(schema!=1)std::copy_n(r.begin()+20,4,value.widths.begin());
         result.override_value={true,value};
     }
     return result;

@@ -28,7 +28,7 @@ using Ui16CrtSaveFn=bool (*)(const Ui16RomIdentity &,const Ui16CrtSettings &,boo
 struct Menu;
 Menu *ui16_create_crt_menu(bool horizontal_blur=false,bool scanline=false);
 using Ui16CrtWidthsFn=void (*)(const std::array<std::uint8_t,4> &);
-void ui16_crt_set_width_sender(Ui16CrtWidthsFn send,bool supports_glow=false,bool supports_curve=false,bool supports_convergence=false,bool supports_ntsc=false);
+void ui16_crt_set_width_sender(Ui16CrtWidthsFn send,bool supports_glow=false,bool supports_curve=false,bool supports_convergence=false,bool supports_ntsc=false,bool supports_bloom=false);
 void ui16_crt_new_session(const Ui16CrtRecommendation &recommended={},const Ui16RomIdentity &rom_id={},const Ui16CrtRestore &restore={},Ui16CrtSaveFn save=nullptr,const Ui16CrtDefaults &defaults={});
 void ui16_crt_accept_status(std::uint32_t applied);
 // SNES stages 1/2: builtin OFF baseline, volatile preview, no storage access.

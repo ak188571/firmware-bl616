@@ -18,6 +18,9 @@ constexpr unsigned UI16_CRT_CURVE_RECORD=6;
 constexpr unsigned UI16_CRT_CONVERGENCE_RECORD=7;
 // NTSC implies Composite; byte 5 bit 2 is available for convergence in this format.
 constexpr unsigned UI16_CRT_NTSC_RECORD=8;
+// Setting bit 4 of the schema byte on extended USER formats 3 through 8
+// denotes Bloom. Their original payload and the full 32-byte CRC remain intact.
+constexpr unsigned UI16_CRT_BLOOM_FLAG=0x10;
 constexpr unsigned UI16_CRT_SIGNAL_SYSTEM_MASK=3;
 
 enum class Ui16CrtReadState { NoId, Missing, User, Reset, Recovered, Bad, Io, Future, Conflict };
