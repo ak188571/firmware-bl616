@@ -532,7 +532,7 @@ int main(){
     }
     // Exercise the real input loop through all three pages. SAVE must still
     // resolve to the selected action after the page changes its option count.
-    ui16_crt_set_width_sender([](const std::array<std::uint8_t,4>&){},true,true,true,true,true);
+    ui16_crt_set_width_sender([](const std::array<std::uint8_t,4>&){},true,true,true,true,true,true);
     for(unsigned system:{1u,2u}){
         auto id=rom_id;id.system=system;
         if(system==2)ui16_crt_snes_session({},id,{},save_test,{});
@@ -547,7 +547,8 @@ int main(){
         press(0x20);press(0x01); // CURVATURE -> ON
         press(0x20);press(0x01); // CONVERGENCE -> ON
         press(0x20);press(0x01); // BLOOM -> ON
-        for(int row=11;row>0;--row)press(0x10);
+        press(0x20);press(0x01); // AFTERGLOW -> ON
+        for(int row=12;row>0;--row)press(0x10);
         press(0x01); // PAGE -> OVERSCAN
         press(0x20);press(0x80);press(0x20);press(0x80); // enable and set top width
         press(0x10);press(0x10);press(0x80); // PAGE -> MAIN
@@ -561,6 +562,7 @@ int main(){
         ui16_osd_menu_input_loop(false,"CRT SETTINGS",true);
         assert(!overlay_on()&&saves==previously_saved+1&&saved_value.flags()==0x4041&&saved_value.glow&&saved_value.composite);
         assert((config>>16)==0xc043 && saved_value.curvature && (config & Ui16CrtSettings::CurveBit));
+        assert(saved_value.persistence && (config & Ui16CrtSettings::PersistenceBit));
         assert(saved_value.bloom && (config & Ui16CrtSettings::BloomBit));
         assert(saved_value.convergence && (config & Ui16CrtSettings::ConvergenceBit));
         assert(saved_value.ntsc && (config & Ui16CrtSettings::NtscBit));

@@ -23,12 +23,12 @@ volatile std::uint32_t applied_status=0;
 volatile bool status_seen=false;
 std::uint32_t last_send_ms=0;
 Ui16CrtWidthsFn send_widths=nullptr;
-bool glow_supported=false,curve_supported=false,convergence_supported=false,ntsc_supported=false,bloom_supported=false;
+bool glow_supported=false,curve_supported=false,convergence_supported=false,ntsc_supported=false,bloom_supported=false,persistence_supported=false;
 void send_settings() {
     last_send_ms=static_cast<std::uint32_t>(bflb_mtimer_get_time_ms());
     taskENTER_CRITICAL();status_seen=false;taskEXIT_CRITICAL();
     if(send_widths)send_widths(settings.widths);
-    set_core_config(settings.merge(get_core_config(),send_widths!=nullptr,glow_supported,curve_supported,convergence_supported,ntsc_supported,bloom_supported));
+    set_core_config(settings.merge(get_core_config(),send_widths!=nullptr,glow_supported,curve_supported,convergence_supported,ntsc_supported,bloom_supported,persistence_supported));
 }
 const char *strength(unsigned n) {
     static const char *const names[]={"OFF","WEAK","STD","STRONG"};
@@ -82,6 +82,7 @@ struct CrtMenu:Menu {
             if(curve_supported){overlay_cursor(0,y++);overlay_printf("CURVATURE %s",settings.curvature?"ON":"OFF");}
             if(convergence_supported){overlay_cursor(0,y++);overlay_printf("CONVERGENCE %s",settings.convergence?"ON":"OFF");}
             if(bloom_supported){overlay_cursor(0,y++);overlay_printf("BLOOM %s",settings.bloom?"ON":"OFF");}
+            if(persistence_supported){overlay_cursor(0,y++);overlay_printf("AFTERGLOW %s",settings.persistence?"ON":"OFF");}
         }else{
             static const char *const edges[]={"TOP","BOTTOM","LEFT","RIGHT"};
             overlay_cursor(0,y++);overlay_printf("OVERSCAN %s",settings.overscan?"ON":"OFF");
@@ -107,6 +108,7 @@ struct CrtMenu:Menu {
             if(curve_supported)rows.push_back(9);
             if(convergence_supported)rows.push_back(10);
             if(bloom_supported)rows.push_back(11);
+            if(persistence_supported)rows.push_back(12);
             return rows;
         }
         if(page==Crop)return {0,1,2,3,4,5};
@@ -137,6 +139,7 @@ struct CrtMenu:Menu {
                     break;
             case 7: if(!glow_supported)return false;settings.glow=!settings.glow;break;
             case 8: if(!curve_supported)return false;settings.curvature=!settings.curvature;break;
+            case 11: if(!persistence_supported)return false;settings.persistence=!settings.persistence;break;
             case 10: if(!bloom_supported)return false;settings.bloom=!settings.bloom;break;
             case 9: if(!convergence_supported)return false;settings.convergence=!settings.convergence;break;
             default:return false;
@@ -193,7 +196,7 @@ struct CrtMenu:Menu {
     bool on_tick(std::uint32_t now)override {
         bool seen;std::uint32_t value;
         taskENTER_CRITICAL();seen=status_seen;value=applied_status;taskEXIT_CRITICAL();
-        const bool next=seen && value==settings.merge(value,extended,glow_supported,curve_supported,convergence_supported,ntsc_supported,bloom_supported);
+        const bool next=seen && value==settings.merge(value,extended,glow_supported,curve_supported,convergence_supported,ntsc_supported,bloom_supported,persistence_supported);
         const bool changed=next!=matched;matched=next;
         // Recover a lost setting packet instead of waiting indefinitely for a
         // value that was never received. Requests are idempotent and coalesce.
@@ -205,11 +208,12 @@ struct CrtMenu:Menu {
     }
 };
 }
-void ui16_crt_set_width_sender(Ui16CrtWidthsFn send,bool supports_glow,bool supports_curve,bool supports_convergence,bool supports_ntsc,bool supports_bloom){
+void ui16_crt_set_width_sender(Ui16CrtWidthsFn send,bool supports_glow,bool supports_curve,bool supports_convergence,bool supports_ntsc,bool supports_bloom,bool supports_persistence){
     send_widths=send;glow_supported=send && supports_glow;curve_supported=glow_supported && supports_curve;
     convergence_supported=curve_supported && supports_convergence;
     ntsc_supported=convergence_supported && supports_ntsc;
     bloom_supported=ntsc_supported && supports_bloom;
+    persistence_supported=bloom_supported && supports_persistence;
 }
 void ui16_crt_new_session(const Ui16CrtRecommendation &recommended,const Ui16RomIdentity &rom_id,const Ui16CrtRestore &restore,Ui16CrtSaveFn save,const Ui16CrtDefaults &defaults){
     preview_only=false;read_only=false;

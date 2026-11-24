@@ -24,7 +24,7 @@ Read read_record(const char *path,const Ui16RomIdentity &id,FIL &file,void *buff
     std::copy_n(static_cast<unsigned char *>(buffer),32,record.begin());
     if(record[0]!='C'||record[1]!='R'||record[2]!='T'||record[3]!='1'||
        (ui16_rom_crc(0xffffffffu,record.data(),28)^0xffffffffu)!=number(record,28,4))return Read::Bad;
-    const unsigned schema=record[4] & ~UI16_CRT_BLOOM_FLAG;
+    const unsigned schema=record[4] & ~(UI16_CRT_BLOOM_FLAG | UI16_CRT_PERSISTENCE_FLAG);
     if(schema==1 && record[4]!=1)return Read::Future;
     const bool signal=schema==UI16_CRT_SIGNAL_RECORD || schema==UI16_CRT_CURVE_RECORD || schema==UI16_CRT_CONVERGENCE_RECORD || schema==UI16_CRT_NTSC_RECORD;
     if(!signal && schema!=1 && schema!=UI16_CRT_EXT_RECORD && schema!=UI16_CRT_GLOW_RECORD)return Read::Future;
@@ -63,13 +63,14 @@ Ui16CrtRestore ui16_read_crt_override(const Ui16RomIdentity &id,FIL &file,void *
     }
     const bool bad=states[0]==Read::Bad||states[1]==Read::Bad;
     if(best<0){result.state=bad?Ui16CrtReadState::Bad:Ui16CrtReadState::Missing;return result;}
-    const auto &r=records[best];const unsigned schema=r[4] & ~UI16_CRT_BLOOM_FLAG;
+    const auto &r=records[best];const unsigned schema=r[4] & ~(UI16_CRT_BLOOM_FLAG | UI16_CRT_PERSISTENCE_FLAG);
     const bool user=schema!=1 || r[6]==0;
     result.selected_slot=best;
     result.generation=static_cast<std::uint32_t>(number(r,24,4));
     result.state=bad?Ui16CrtReadState::Recovered:user?Ui16CrtReadState::User:Ui16CrtReadState::Reset;
     if(user){
         auto value=Ui16CrtSettings::from_flags(schema==1?r[20]:number(r,6,2));
+        value.persistence=(r[4] & UI16_CRT_PERSISTENCE_FLAG)!=0;
         value.bloom=(r[4] & UI16_CRT_BLOOM_FLAG)!=0;
         value.glow=schema==UI16_CRT_GLOW_RECORD;
         value.ntsc=schema==UI16_CRT_NTSC_RECORD;

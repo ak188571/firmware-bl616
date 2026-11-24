@@ -74,7 +74,7 @@ int option_osd_key = OPTION_OSD_KEY_SELECT_RIGHT;
 int16_t active_core = -1;           // firmware detected this core as active
 bool core_running;                  // a ROM is loaded and running on the core
 #ifdef UI16_SYSTEM_MENU
-static volatile bool osd_config_ready=false,osd_config_capable=false,crt_stage1_capable=false,crt_blur_capable=false,crt_scanline_capable=false,crt_glow_capable=false,crt_curve_capable=false,crt_convergence_capable=false,crt_ntsc_capable=false,crt_bloom_capable=false,restart_capable=false;
+static volatile bool osd_config_ready=false,osd_config_capable=false,crt_stage1_capable=false,crt_blur_capable=false,crt_scanline_capable=false,crt_glow_capable=false,crt_curve_capable=false,crt_convergence_capable=false,crt_ntsc_capable=false,crt_bloom_capable=false,crt_persistence_capable=false,restart_capable=false;
 static Ui16GameOsd game_osd_owner=Ui16GameOsd::System;
 #endif
 struct core_info *core;
@@ -414,7 +414,7 @@ static void uart1_rx_task(void *pvParameters)
 #ifdef UI16_SYSTEM_MENU
     char osd_tag[7]={};
     unsigned osd_tag_count=0;
-    bool osd_tag_found=false,crt_tag_found=false,blur_tag_found=false,scan_tag_found=false,glow_tag_found=false,curve_tag_found=false,convergence_tag_found=false,ntsc_tag_found=false,bloom_tag_found=false,restart_tag_found=false,rom_tag_found=false,spi_tag_found=false,uart8_tag_found=false;
+    bool osd_tag_found=false,crt_tag_found=false,blur_tag_found=false,scan_tag_found=false,glow_tag_found=false,curve_tag_found=false,convergence_tag_found=false,ntsc_tag_found=false,bloom_tag_found=false,persistence_tag_found=false,restart_tag_found=false,rom_tag_found=false,spi_tag_found=false,uart8_tag_found=false;
 #endif
     while (1) {
         uint8_t ch=0;
@@ -465,7 +465,7 @@ static void uart1_rx_task(void *pvParameters)
                 pos = 0;
             } else if (type == 2) {                 // config string / OSD feature marker
 #ifdef UI16_SYSTEM_MENU
-                if(pos==4){osd_tag_count=0;osd_tag_found=false;crt_tag_found=false;blur_tag_found=false;scan_tag_found=false;glow_tag_found=false;curve_tag_found=false;convergence_tag_found=false;ntsc_tag_found=false;bloom_tag_found=false;restart_tag_found=false;rom_tag_found=false;spi_tag_found=false;uart8_tag_found=false;}
+                if(pos==4){osd_tag_count=0;osd_tag_found=false;crt_tag_found=false;blur_tag_found=false;scan_tag_found=false;glow_tag_found=false;curve_tag_found=false;convergence_tag_found=false;ntsc_tag_found=false;bloom_tag_found=false;persistence_tag_found=false;restart_tag_found=false;rom_tag_found=false;spi_tag_found=false;uart8_tag_found=false;}
                 for(unsigned i=0;i<6;++i)osd_tag[i]=osd_tag[i+1];
                 osd_tag[6]=static_cast<char>(ch);
                 if(++osd_tag_count>=7&&memcmp(osd_tag,"OSDWIN1",7)==0)osd_tag_found=true;
@@ -477,13 +477,14 @@ static void uart1_rx_task(void *pvParameters)
                 if(osd_tag_count>=7&&memcmp(osd_tag,"CRTCON1",7)==0)convergence_tag_found=true;
                 if(osd_tag_count>=7&&memcmp(osd_tag,"CRTNTC1",7)==0)ntsc_tag_found=true;
                 if(osd_tag_count>=7&&memcmp(osd_tag,"CRTBLM1",7)==0)bloom_tag_found=true;
+                if(osd_tag_count>=7&&memcmp(osd_tag,"CRTPRS1",7)==0)persistence_tag_found=true;
                 if(osd_tag_count>=7&&memcmp(osd_tag,"RSTROM1",7)==0)restart_tag_found=true;
                 if(osd_tag_count>=7&&memcmp(osd_tag,"ROMXFR1",7)==0)rom_tag_found=true;
                 if(osd_tag_count>=7&&memcmp(osd_tag,"UART8M1",7)==0)uart8_tag_found=true;
                 if(osd_tag_count>=7&&memcmp(osd_tag,"SPIDAT1",7)==0)spi_tag_found=true;
                 if(pos==len+2){
                     tc_rom_uart_capabilities(rom_tag_found,uart8_tag_found,spi_tag_found);
-                    taskENTER_CRITICAL();restart_capable=osd_tag_found&&restart_tag_found;crt_blur_capable=osd_tag_found&&crt_tag_found&&blur_tag_found;crt_scanline_capable=crt_blur_capable&&scan_tag_found;crt_glow_capable=crt_scanline_capable&&glow_tag_found;crt_curve_capable=crt_glow_capable&&curve_tag_found;crt_convergence_capable=crt_curve_capable&&convergence_tag_found;crt_ntsc_capable=crt_convergence_capable&&ntsc_tag_found;crt_bloom_capable=crt_ntsc_capable&&bloom_tag_found;osd_config_capable=osd_tag_found;crt_stage1_capable=osd_tag_found&&crt_tag_found;osd_config_ready=true;taskEXIT_CRITICAL();
+                    taskENTER_CRITICAL();restart_capable=osd_tag_found&&restart_tag_found;crt_blur_capable=osd_tag_found&&crt_tag_found&&blur_tag_found;crt_scanline_capable=crt_blur_capable&&scan_tag_found;crt_glow_capable=crt_scanline_capable&&glow_tag_found;crt_curve_capable=crt_glow_capable&&curve_tag_found;crt_convergence_capable=crt_curve_capable&&convergence_tag_found;crt_ntsc_capable=crt_convergence_capable&&ntsc_tag_found;crt_bloom_capable=crt_ntsc_capable&&bloom_tag_found;crt_persistence_capable=crt_bloom_capable&&persistence_tag_found;osd_config_capable=osd_tag_found;crt_stage1_capable=osd_tag_found&&crt_tag_found;osd_config_ready=true;taskEXIT_CRITICAL();
                 }
 #endif
                 if(pos==len+2)pos=0;else ++pos;
@@ -569,7 +570,7 @@ static void uart1_rx_task(void *pvParameters)
 static bool ui16_hw_osd_ready(void *)
 {
     tc_rom_uart_capabilities(false,false);
-    taskENTER_CRITICAL();osd_config_ready=false;osd_config_capable=false;crt_stage1_capable=false;crt_blur_capable=false;crt_scanline_capable=false;crt_glow_capable=false;crt_curve_capable=false;crt_convergence_capable=false;crt_ntsc_capable=false;crt_bloom_capable=false;restart_capable=false;taskEXIT_CRITICAL();
+    taskENTER_CRITICAL();osd_config_ready=false;osd_config_capable=false;crt_stage1_capable=false;crt_blur_capable=false;crt_scanline_capable=false;crt_glow_capable=false;crt_curve_capable=false;crt_convergence_capable=false;crt_ntsc_capable=false;crt_bloom_capable=false;crt_persistence_capable=false;restart_capable=false;taskEXIT_CRITICAL();
     fpga_tx_header(2,1);
     const auto start=bflb_mtimer_get_time_ms();
     while(!osd_config_ready&&bflb_mtimer_get_time_ms()-start<400)delay(10);
@@ -842,7 +843,7 @@ static void main_task(void *pvParameters)
                     ui16_wait_release();
                     if(crt_stage1_capable){
                         ui16_crt_set_width_sender(crt_scanline_capable && (request.core_id==1 || request.core_id==2)
-                                                  ? ui16_send_crt_widths : nullptr,crt_glow_capable,crt_curve_capable,crt_convergence_capable,crt_ntsc_capable,crt_bloom_capable);
+                                                  ? ui16_send_crt_widths : nullptr,crt_glow_capable,crt_curve_capable,crt_convergence_capable,crt_ntsc_capable,crt_bloom_capable,crt_persistence_capable);
                         if(request.core_id==2){
                             if(snes_crt_sd_session)ui16_crt_snes_session(request.crt_recommendation,crt_rom_identity,crt_restore,ui16_hw_save_crt,crt_defaults);
                             else ui16_crt_preview_session(); // USB ROM storage stays volatile in S4a.

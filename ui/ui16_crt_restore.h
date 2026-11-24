@@ -21,6 +21,8 @@ constexpr unsigned UI16_CRT_NTSC_RECORD=8;
 // Setting bit 4 of the schema byte on extended USER formats 3 through 8
 // denotes Bloom. Their original payload and the full 32-byte CRC remain intact.
 constexpr unsigned UI16_CRT_BLOOM_FLAG=0x10;
+// Bit 5 independently marks afterglow in the same extended USER records.
+constexpr unsigned UI16_CRT_PERSISTENCE_FLAG=0x20;
 constexpr unsigned UI16_CRT_SIGNAL_SYSTEM_MASK=3;
 
 enum class Ui16CrtReadState { NoId, Missing, User, Reset, Recovered, Bad, Io, Future, Conflict };
