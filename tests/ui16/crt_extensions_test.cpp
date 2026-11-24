@@ -131,5 +131,36 @@ int main(int argc,char **argv){
     menu=launch(a);expect(19);
     const auto recovered=ui16_read_crt_override(a,file,buffer.data(),buffer.size());
     assert(recovered.state==Ui16CrtReadState::Recovered && recovered.generation==7);
+    // The signal selector is the last selectable option on MAIN. Older records
+    // supply the RGB bank verbatim. Changing either bank must preserve the other.
+    line(*menu,6,"SIGNAL RGB");change(*menu,6);expect(0x8013);
+    line(*menu,6,"SIGNAL COMPOSITE");
+    menu->on_info(0x0008);
+    ui16_crt_accept_status(config ^ (1u<<31));menu->on_tick(3);line(*menu,10,"WAITING");
+    ui16_crt_accept_status(config);menu->on_tick(4);line(*menu,10,"FRAME ACK");
+    menu->on_info(0x0008);assert(menu->on_close());expect(19);
+    menu=launch(b);change(*menu,1);expect(1);
+    choose(*menu,6);line(*menu,2,"BLUR WEAK");expect(0x8003);
+    change(*menu,2);expect(0x8005); // Composite STD.
+    choose(*menu,0);change(*menu,7);expect(5); // Composite bleed OFF.
+    change(*menu,8);expect(5,{},true);       // Glow is shared.
+    choose(*menu,0);choose(*menu,0);choose(*menu,4);line(*menu,4,"SAVE OK");
+    menu=launch(a);expect(19);line(*menu,6,"SIGNAL RGB");
+    menu=launch(b);expect(5,{},true);line(*menu,6,"SIGNAL COMPOSITE");
+    change(*menu,6,-1);expect(1,{},true);line(*menu,2,"BLUR OFF");
+    change(*menu,2,-1);expect(7,{},true); // RGB STRONG.
+    choose(*menu,0);change(*menu,7);expect(0x8007,{},true);
+    choose(*menu,0);choose(*menu,0);choose(*menu,4);
+    menu=launch(b);expect(0x8007,{},true);line(*menu,6,"SIGNAL RGB");
+    choose(*menu,6);expect(5,{},true);
+    choose(*menu,0);line(*menu,7,"CHROMA BLEED OFF");
+    assert(menu->on_close());expect(0x8007,{},true);
+    menu=launch(b);choose(*menu,5);expect(0);choose(*menu,4);
+    menu=launch(b);line(*menu,6,"SIGNAL RGB");expect(0);choose(*menu,6);expect(0x8002);
+    ui16_crt_preview_session();
+    menu.reset(ui16_create_crt_menu(true,true));
+    assert(menu->get_options().back()==6 && menu->get_options().size()==5);
+    choose(*menu,4);line(*menu,6,"SIGNAL COMPOSITE");
+    std::printf("PASS system %u: independent RGB/Composite controls, shared Glow, legacy RGB, per-ROM v5 save/reload, cancel, reset and preview navigation\n",system);
     std::printf("PASS system %u: Glow toggle and frame ACK, old-core gating, schema 1/3/4 ROM A/B reload, cancel/reset\n",system);
 }

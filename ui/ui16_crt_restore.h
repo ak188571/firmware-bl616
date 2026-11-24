@@ -7,6 +7,13 @@ constexpr unsigned UI16_CRT_EXT_RECORD=3;
 // Same payload as schema 3; schema 4 identifies a USER record with Glow enabled.
 constexpr unsigned UI16_CRT_GLOW_RECORD=4;
 
+// Schema 5 retains the 32-byte slot and CRC layout. Byte 5 holds NES/SNES ID
+// in bits 1:0, selected signal in bit 2, Composite blur in 4:3, Composite
+// bleed in bit 5 and shared Glow in bit 6. Bit 7 is reserved. Flags in 6:7
+// keep both RGB controls; widths and the full ROM key/generation are unchanged.
+constexpr unsigned UI16_CRT_SIGNAL_RECORD=5;
+constexpr unsigned UI16_CRT_SIGNAL_SYSTEM_MASK=3;
+
 enum class Ui16CrtReadState { NoId, Missing, User, Reset, Recovered, Bad, Io, Future, Conflict };
 struct Ui16CrtRestore {
     Ui16CrtReadState state=Ui16CrtReadState::NoId;

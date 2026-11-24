@@ -42,6 +42,7 @@ struct CrtMenu:Menu {
     bool info=false;
     enum Page { Main, Effects, Crop };
     Page page=Main;
+    int signal_option()const{return (storage_actions_disabled()?4:6)-int(blur_supported&&!scan_supported);}
     int osd_width()const override{return info?21:13;}
     const Ui16OsdStyle *osd_style()const override{
         static const Ui16OsdStyle normal{13,"CRT X/Y:BACK","START:INFO",true};
@@ -61,10 +62,11 @@ struct CrtMenu:Menu {
         }
         if(page==Main){
             overlay_cursor(0,y++);overlay_printf("%s %s",blur_supported?"CRT  ":"CRT REQ",settings.enabled?"ON":"OFF");
-            overlay_cursor(0,y++);overlay_printf("BLUR %s",strength(settings.blur));
+            overlay_cursor(0,y++);overlay_printf("BLUR %s",strength(extended?settings.signal_blur():settings.blur));
             overlay_cursor(0,y++);overlay_printf("SCAN %s",blur_supported&&!scan_supported?"N/A":strength(settings.scanline));
             overlay_cursor(0,y++);overlay_printf("%s",storage_actions_disabled()?"SAVE N/A":save_failed?"SAVE FAILED":dirty()?"SAVE *":(saved_user||persisted_reset)?"SAVE OK":"SAVE");
             overlay_cursor(0,y++);overlay_printf("%s",reset_available()?"RESET":"RESET N/A");
+            if(extended){overlay_cursor(0,y++);overlay_printf("SIGNAL %s",settings.composite?"COMPOSITE":"RGB");}
         }else if(page==Effects){
             static const char *const masks[]={"OFF","APERTURE GRILLE","SHADOW MASK"};
             static const char *const gamma[]={"OFF","0.80","1.25"};
@@ -75,7 +77,7 @@ struct CrtMenu:Menu {
             overlay_cursor(0,y++);overlay_printf("WHITE POINT %s",temperatures[settings.temperature]);
             overlay_cursor(0,y++);overlay_printf("VIGNETTE %s",settings.vignette?"ON":"OFF");
             overlay_cursor(0,y++);overlay_printf("CORNERS %s",settings.rounded?"ON":"OFF");
-            overlay_cursor(0,y++);overlay_printf("CHROMA BLEED %s",settings.bleed?"ON":"OFF");
+            overlay_cursor(0,y++);overlay_printf("CHROMA BLEED %s",settings.signal_bleed()?"ON":"OFF");
             if(glow_supported){overlay_cursor(0,y++);overlay_printf("GLOW %s",settings.glow?"ON":"OFF");}
         }else{
             static const char *const edges[]={"TOP","BOTTOM","LEFT","RIGHT"};
@@ -106,6 +108,7 @@ struct CrtMenu:Menu {
         if(extended)rows.push_back(0);
         for(int i=0;i<(storage_actions_disabled()?3:5);++i)
             if(i!=2 || !blur_supported || scan_supported)rows.push_back(i+int(extended));
+        if(extended)rows.push_back(6);
         return rows;
     }
     bool on_adjust(int row,int delta)override {
@@ -123,7 +126,9 @@ struct CrtMenu:Menu {
             case 3: settings.temperature=(settings.temperature+step)%3;break;
             case 4: settings.vignette=!settings.vignette;break;
             case 5: settings.rounded=!settings.rounded;break;
-            case 6: settings.bleed=!settings.bleed;break;
+            case 6: if(settings.composite)settings.composite_bleed=!settings.composite_bleed;
+                    else settings.bleed=!settings.bleed;
+                    break;
             case 7: if(!glow_supported)return false;settings.glow=!settings.glow;break;
             default:return false;
             }
@@ -132,7 +137,10 @@ struct CrtMenu:Menu {
             else if(row>=1 && row<=4)settings.widths[row-1]+=delta>0?1:-1;
             else return false;
         }else if(row==0)settings.enabled=!settings.enabled;
-        else if(row==1)settings.blur=(settings.blur+(delta>0?1:3))%4;
+        else if(row==1){
+            auto &blur=(extended && settings.composite)?settings.composite_blur:settings.blur;
+            blur=(blur+(delta>0?1:3))%4;
+        }else if(extended && row==signal_option()-1)settings.composite=!settings.composite;
         else if(row==2&&(!blur_supported||scan_supported))settings.scanline=(settings.scanline+(delta>0?1:3))%4;
         else return false;
         reset_preview=false;save_failed=false;matched=false;send_settings();return true;
@@ -143,7 +151,7 @@ struct CrtMenu:Menu {
         reset_preview=persisted_reset;save_failed=false;return true;
     }
     bool on_choose(int row)override {
-        if(extended && (row==0 || page!=Main)){on_adjust(row,1);redraw=true;return false;}
+        if(extended && (row==0 || page!=Main || row==signal_option())){on_adjust(row,1);redraw=true;return false;}
         const int option=row;
         if(extended)--row;
         const int save_row=(blur_supported&&!scan_supported)?2:3;
@@ -162,7 +170,7 @@ struct CrtMenu:Menu {
         on_adjust(option,1);redraw=true;return false;
     }
     bool inline_choice(int row)const override{
-        if(page!=Main)return true;
+        if(page!=Main || (extended && row==signal_option()))return true;
         const int save_row=(blur_supported&&!scan_supported?2:3)+int(extended);
         return row<save_row||(reset_available()&&row==save_row+1);
     }

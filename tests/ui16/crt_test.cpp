@@ -549,11 +549,18 @@ int main(){
         press(0x20);press(0x80);press(0x20);press(0x80); // enable and set top width
         press(0x10);press(0x10);press(0x80); // PAGE -> MAIN
         press(0x20);press(0x80); // master CRT -> ON
-        press(0x20);press(0x20);press(0x20);press(0x01); // SAVE
+        press(0x20);press(0x20);press(0x20); // SAVE row
+        press(0x20);press(0x20);press(0x01); // select SIGNAL COMPOSITE
+        press(0x10);press(0x10);press(0x01); // save both banks and selected signal
         press(0x200);
         const auto previously_saved=saves;
         ui16_osd_menu_input_loop(false,"CRT SETTINGS",true);
-        assert(!overlay_on()&&saves==previously_saved+1&&saved_value.flags()==0x4041&&saved_value.glow);
+        assert(!overlay_on()&&saves==previously_saved+1&&saved_value.flags()==0x4041&&saved_value.glow&&saved_value.composite);
+        assert((config>>16)==0xc043);
+        bool saw_signal=false;
+        for(const auto &view:snapshots)
+            saw_signal |= visible(view,0,0,32,28).find("SIGNAL COMPOSITE")!=std::string::npos;
+        assert(saw_signal);
         assert((saved_value.widths==std::array<std::uint8_t,4>{1,0,0,0}));
         menu_clear();
     }

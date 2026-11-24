@@ -12,9 +12,16 @@ struct Ui16CrtSettings {
     std::array<std::uint8_t,4> widths{}; // top, bottom, left, right, in output pixels
 
     bool glow=false;
+    // The original blur and bleed fields are the RGB bank, including legacy records.
+    bool composite=false;
+    unsigned composite_blur=1;
+    bool composite_bleed=true;
+    bool needs_signal_record() const {return composite || composite_blur!=1 || !composite_bleed;}
+    unsigned signal_blur() const {return composite ? composite_blur : blur;}
+    bool signal_bleed() const {return composite ? composite_bleed : bleed;}
     static constexpr std::uint32_t GlowBit=1u<<15;
 
-    bool valid() const {return blur<4 && scanline<4 && mask<3 && gamma<3 && temperature<3;}
+    bool valid() const {return composite_blur<4 && blur<4 && scanline<4 && mask<3 && gamma<3 && temperature<3;}
     std::uint16_t flags() const {
         return enabled | (blur<<1) | (scanline<<3) | (beam<<5) | (mask<<6) |
                (gamma<<8) | (temperature<<10) | (vignette<<12) | (rounded<<13) |
@@ -29,9 +36,14 @@ struct Ui16CrtSettings {
     std::uint32_t merge(std::uint32_t config,bool extended=false,bool supports_glow=false)const {
         const std::uint32_t mask=extended?0xffff0000u:0x001f0000u;
         if(supports_glow)config=(config&~GlowBit)|(glow?GlowBit:0u);
-        return (config&~mask)|((std::uint32_t(flags())<<16)&mask);
+        auto active=flags();
+        if(extended && composite){
+            active=(active & ~0x8006u) | (composite_blur<<1) | (unsigned(composite_bleed)<<15);
+        }
+        return (config&~mask)|((std::uint32_t(active)<<16)&mask);
     }
-    bool operator==(const Ui16CrtSettings &v)const{return flags()==v.flags() && widths==v.widths && glow==v.glow;}
+    bool operator==(const Ui16CrtSettings &v)const{return flags()==v.flags() && widths==v.widths && glow==v.glow &&
+        composite==v.composite && composite_blur==v.composite_blur && composite_bleed==v.composite_bleed;}
     bool operator!=(const Ui16CrtSettings &v)const{return !(*this==v);}
 };
 struct Ui16CrtRecommendation {bool present=false;Ui16CrtSettings settings;};

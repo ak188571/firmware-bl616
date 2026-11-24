@@ -7,7 +7,8 @@
 
 bool ui16_save_crt_override(const Ui16RomIdentity &id,const Ui16CrtSettings &value,
                            FIL &file,void *buffer,UINT capacity,bool reset){
-    if(!value.valid())return false;
+    const bool signal=!reset && value.needs_signal_record();
+    if(!value.valid() || (signal && id.system!=1 && id.system!=2))return false;
     // Re-read before EVERY attempt. A previous failed sync/close/verification
     // may have produced a valid new generation; protect that generation too.
     const auto current=ui16_read_crt_override(id,file,buffer,capacity);
@@ -22,8 +23,13 @@ bool ui16_save_crt_override(const Ui16RomIdentity &id,const Ui16CrtSettings &val
     // Keep legacy-only values and RESET readable by older firmware. The extension
     // represents a USER record; its widths and flags share the same CRC and slot.
     const auto flags=value.flags();
-    if(!reset && (value.glow || (flags & ~31u) || value.widths!=Ui16CrtSettings{}.widths)){
+    if(!reset && (signal || value.glow || (flags & ~31u) || value.widths!=Ui16CrtSettings{}.widths)){
         record[4]=value.glow?UI16_CRT_GLOW_RECORD:UI16_CRT_EXT_RECORD;
+        if(signal){
+            record[4]=UI16_CRT_SIGNAL_RECORD;
+            record[5]=id.system | (unsigned(value.composite)<<2) | (value.composite_blur<<3) |
+                      (unsigned(value.composite_bleed)<<5) | (unsigned(value.glow)<<6);
+        }
         put(6,flags,2);
         std::copy(value.widths.begin(),value.widths.end(),record.begin()+20);
     }else record[20]=reset?0:static_cast<unsigned char>(flags);

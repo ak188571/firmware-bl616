@@ -71,6 +71,21 @@ int main(){
     files[prefix+".b"]=files[prefix+".a"];assert(read().state==Ui16CrtReadState::User);
     // Every record byte is protected; even matching filenames cannot bypass CRC.
     for(unsigned i=0;i<32;++i){setup();auto r=record();r[i]^=1;files[prefix+".a"]=r;assert(read().state==Ui16CrtReadState::Bad&&!read().override_value.present);}
+    // Schema 5 uses only the low two key bits for the system. The CRC still
+    // covers every profile bit, and a different system cannot claim this ROM.
+    for(unsigned bits=0;bits<32;++bits){
+        setup();auto r=record();r[4]=UI16_CRT_SIGNAL_RECORD;r[5]=TEST_CRT_SYSTEM|(bits<<2);
+        put(r,6,0x8003u,2);crc(r);files[prefix+".a"]=r;
+        const auto value=read().override_value;
+        assert(value.present && value.settings.composite==bool(bits&1) &&
+               value.settings.composite_blur==((bits>>1)&3) && value.settings.composite_bleed==bool(bits&8) &&
+               value.settings.glow==bool(bits&16) && value.settings.blur==1 && value.settings.bleed);
+        r[5]^=4;files[prefix+".a"]=r;assert(read().state==Ui16CrtReadState::Bad);
+    }
+    for(unsigned header:{0u,3u,3u-TEST_CRT_SYSTEM,128u|TEST_CRT_SYSTEM}){
+        setup();auto r=record();r[4]=UI16_CRT_SIGNAL_RECORD;r[5]=header;crc(r);files[prefix+".a"]=r;
+        assert(read().state==Ui16CrtReadState::Bad);
+    }
     // Valid CRC does not excuse wrong schema, identity, kind, reserved bits, or tombstone value.
     for(unsigned at:{4u,5u,6u,7u,8u,12u,20u,21u,22u,23u}){
         setup();auto r=record();r[at]=at==4?2:at==6?2:at==20?32:static_cast<unsigned char>(r[at]^1);crc(r);files[prefix+".a"]=r;

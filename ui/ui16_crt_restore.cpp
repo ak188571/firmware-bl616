@@ -24,8 +24,11 @@ Read read_record(const char *path,const Ui16RomIdentity &id,FIL &file,void *buff
     std::copy_n(static_cast<unsigned char *>(buffer),32,record.begin());
     if(record[0]!='C'||record[1]!='R'||record[2]!='T'||record[3]!='1'||
        (ui16_rom_crc(0xffffffffu,record.data(),28)^0xffffffffu)!=number(record,28,4))return Read::Bad;
-    if(record[4]!=1 && record[4]!=UI16_CRT_EXT_RECORD && record[4]!=UI16_CRT_GLOW_RECORD)return Read::Future;
-    if(record[5]!=id.system||number(record,8,4)!=id.crc||number(record,12,8)!=id.size)return Read::Bad;
+    const bool signal=record[4]==UI16_CRT_SIGNAL_RECORD;
+    if(!signal && record[4]!=1 && record[4]!=UI16_CRT_EXT_RECORD && record[4]!=UI16_CRT_GLOW_RECORD)return Read::Future;
+    const unsigned system=signal?(record[5]&UI16_CRT_SIGNAL_SYSTEM_MASK):record[5];
+    if(signal && ((record[5]&0x80) || (system!=1 && system!=2)))return Read::Bad;
+    if(system!=id.system||number(record,8,4)!=id.crc||number(record,12,8)!=id.size)return Read::Bad;
     if(record[4]==1){
         if(record[6]>1||record[7]||record[20]>31||record[21]||record[22]||record[23]||
            (record[6]==1&&record[20]))return Read::Bad;
@@ -65,6 +68,12 @@ Ui16CrtRestore ui16_read_crt_override(const Ui16RomIdentity &id,FIL &file,void *
     if(user){
         auto value=Ui16CrtSettings::from_flags(r[4]==1?r[20]:number(r,6,2));
         value.glow=r[4]==UI16_CRT_GLOW_RECORD;
+        if(r[4]==UI16_CRT_SIGNAL_RECORD){
+            value.composite=(r[5]&4)!=0;
+            value.composite_blur=(r[5]>>3)&3;
+            value.composite_bleed=(r[5]&32)!=0;
+            value.glow=(r[5]&64)!=0;
+        }
         if(r[4]!=1)std::copy_n(r.begin()+20,4,value.widths.begin());
         result.override_value={true,value};
     }
