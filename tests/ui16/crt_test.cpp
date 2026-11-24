@@ -532,7 +532,7 @@ int main(){
     }
     // Exercise the real input loop through all three pages. SAVE must still
     // resolve to the selected action after the page changes its option count.
-    ui16_crt_set_width_sender([](const std::array<std::uint8_t,4>&){},true,true,true);
+    ui16_crt_set_width_sender([](const std::array<std::uint8_t,4>&){},true,true,true,true);
     for(unsigned system:{1u,2u}){
         auto id=rom_id;id.system=system;
         if(system==2)ui16_crt_snes_session({},id,{},save_test,{});
@@ -553,6 +553,7 @@ int main(){
         press(0x20);press(0x80); // master CRT -> ON
         press(0x20);press(0x20);press(0x20); // SAVE row
         press(0x20);press(0x20);press(0x01); // select SIGNAL COMPOSITE
+        press(0x01); // select SIGNAL NTSC
         press(0x10);press(0x10);press(0x01); // save both banks and selected signal
         press(0x200);
         const auto previously_saved=saves;
@@ -560,9 +561,10 @@ int main(){
         assert(!overlay_on()&&saves==previously_saved+1&&saved_value.flags()==0x4041&&saved_value.glow&&saved_value.composite);
         assert((config>>16)==0xc043 && saved_value.curvature && (config & Ui16CrtSettings::CurveBit));
         assert(saved_value.convergence && (config & Ui16CrtSettings::ConvergenceBit));
+        assert(saved_value.ntsc && (config & Ui16CrtSettings::NtscBit));
         bool saw_signal=false;
         for(const auto &view:snapshots)
-            saw_signal |= visible(view,0,0,32,28).find("SIGNAL COMPOSITE")!=std::string::npos;
+            saw_signal |= visible(view,0,0,32,28).find("SIGNAL NTSC")!=std::string::npos;
         assert(saw_signal);
         bool saw_curve=false;
         for(const auto &view:snapshots)

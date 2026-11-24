@@ -16,6 +16,8 @@ constexpr unsigned UI16_CRT_SIGNAL_RECORD=5;
 constexpr unsigned UI16_CRT_CURVE_RECORD=6;
 // Schema 7 implies convergence. Byte 5 bit 7 independently stores curvature.
 constexpr unsigned UI16_CRT_CONVERGENCE_RECORD=7;
+// NTSC implies Composite; byte 5 bit 2 is available for convergence in this format.
+constexpr unsigned UI16_CRT_NTSC_RECORD=8;
 constexpr unsigned UI16_CRT_SIGNAL_SYSTEM_MASK=3;
 
 enum class Ui16CrtReadState { NoId, Missing, User, Reset, Recovered, Bad, Io, Future, Conflict };

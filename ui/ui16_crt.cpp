@@ -23,12 +23,12 @@ volatile std::uint32_t applied_status=0;
 volatile bool status_seen=false;
 std::uint32_t last_send_ms=0;
 Ui16CrtWidthsFn send_widths=nullptr;
-bool glow_supported=false,curve_supported=false,convergence_supported=false;
+bool glow_supported=false,curve_supported=false,convergence_supported=false,ntsc_supported=false;
 void send_settings() {
     last_send_ms=static_cast<std::uint32_t>(bflb_mtimer_get_time_ms());
     taskENTER_CRITICAL();status_seen=false;taskEXIT_CRITICAL();
     if(send_widths)send_widths(settings.widths);
-    set_core_config(settings.merge(get_core_config(),send_widths!=nullptr,glow_supported,curve_supported,convergence_supported));
+    set_core_config(settings.merge(get_core_config(),send_widths!=nullptr,glow_supported,curve_supported,convergence_supported,ntsc_supported));
 }
 const char *strength(unsigned n) {
     static const char *const names[]={"OFF","WEAK","STD","STRONG"};
@@ -66,7 +66,7 @@ struct CrtMenu:Menu {
             overlay_cursor(0,y++);overlay_printf("SCAN %s",blur_supported&&!scan_supported?"N/A":strength(settings.scanline));
             overlay_cursor(0,y++);overlay_printf("%s",storage_actions_disabled()?"SAVE N/A":save_failed?"SAVE FAILED":dirty()?"SAVE *":(saved_user||persisted_reset)?"SAVE OK":"SAVE");
             overlay_cursor(0,y++);overlay_printf("%s",reset_available()?"RESET":"RESET N/A");
-            if(extended){overlay_cursor(0,y++);overlay_printf("SIGNAL %s",settings.composite?"COMPOSITE":"RGB");}
+            if(extended){overlay_cursor(0,y++);overlay_printf("SIGNAL %s",settings.ntsc && ntsc_supported?"NTSC":settings.composite?"COMPOSITE":"RGB");}
         }else if(page==Effects){
             static const char *const masks[]={"OFF","APERTURE GRILLE","SHADOW MASK"};
             static const char *const gamma[]={"OFF","0.80","1.25"};
@@ -146,7 +146,14 @@ struct CrtMenu:Menu {
         else if(row==1){
             auto &blur=(extended && settings.composite)?settings.composite_blur:settings.blur;
             blur=(blur+(delta>0?1:3))%4;
-        }else if(extended && row==signal_option()-1)settings.composite=!settings.composite;
+        }else if(extended && row==signal_option()-1){
+            // RGB and both composite modes share geometry; the two composite
+            // modes use the same blur/bleed bank so their signal paths can be compared.
+            const int count=ntsc_supported?3:2;
+            const int current=settings.ntsc && ntsc_supported?2:int(settings.composite);
+            const int next=(current+(delta>0?1:count-1))%count;
+            settings.composite=next!=0;settings.ntsc=next==2;
+        }
         else if(row==2&&(!blur_supported||scan_supported))settings.scanline=(settings.scanline+(delta>0?1:3))%4;
         else return false;
         reset_preview=false;save_failed=false;matched=false;send_settings();return true;
@@ -183,7 +190,7 @@ struct CrtMenu:Menu {
     bool on_tick(std::uint32_t now)override {
         bool seen;std::uint32_t value;
         taskENTER_CRITICAL();seen=status_seen;value=applied_status;taskEXIT_CRITICAL();
-        const bool next=seen && value==settings.merge(value,extended,glow_supported,curve_supported,convergence_supported);
+        const bool next=seen && value==settings.merge(value,extended,glow_supported,curve_supported,convergence_supported,ntsc_supported);
         const bool changed=next!=matched;matched=next;
         // Recover a lost setting packet instead of waiting indefinitely for a
         // value that was never received. Requests are idempotent and coalesce.
@@ -195,9 +202,10 @@ struct CrtMenu:Menu {
     }
 };
 }
-void ui16_crt_set_width_sender(Ui16CrtWidthsFn send,bool supports_glow,bool supports_curve,bool supports_convergence){
+void ui16_crt_set_width_sender(Ui16CrtWidthsFn send,bool supports_glow,bool supports_curve,bool supports_convergence,bool supports_ntsc){
     send_widths=send;glow_supported=send && supports_glow;curve_supported=glow_supported && supports_curve;
     convergence_supported=curve_supported && supports_convergence;
+    ntsc_supported=convergence_supported && supports_ntsc;
 }
 void ui16_crt_new_session(const Ui16CrtRecommendation &recommended,const Ui16RomIdentity &rom_id,const Ui16CrtRestore &restore,Ui16CrtSaveFn save,const Ui16CrtDefaults &defaults){
     preview_only=false;read_only=false;
