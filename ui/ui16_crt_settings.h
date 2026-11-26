@@ -21,6 +21,8 @@ struct Ui16CrtSettings {
     bool ntsc=false;
     bool bloom=false;
     bool persistence=false;
+    bool spot=false;
+    static constexpr std::uint32_t SpotBit=1u<<9;
     static constexpr std::uint32_t PersistenceBit=1u<<10;
     static constexpr std::uint32_t BloomBit=1u<<11;
     static constexpr std::uint32_t NtscBit=1u<<12;
@@ -43,8 +45,9 @@ struct Ui16CrtSettings {
         v.vignette=bits&0x1000; v.rounded=bits&0x2000; v.overscan=bits&0x4000; v.bleed=bits&0x8000;
         return v;
     }
-    std::uint32_t merge(std::uint32_t config,bool extended=false,bool supports_glow=false,bool supports_curve=false,bool supports_convergence=false,bool supports_ntsc=false,bool supports_bloom=false,bool supports_persistence=false)const {
+    std::uint32_t merge(std::uint32_t config,bool extended=false,bool supports_glow=false,bool supports_curve=false,bool supports_convergence=false,bool supports_ntsc=false,bool supports_bloom=false,bool supports_persistence=false,bool supports_spot=false)const {
         const std::uint32_t mask=extended?0xffff0000u:0x001f0000u;
+        if(supports_spot)config=(config&~SpotBit)|(spot?SpotBit:0u);
         if(supports_persistence)config=(config&~PersistenceBit)|(persistence?PersistenceBit:0u);
         if(supports_bloom)config=(config&~BloomBit)|(bloom?BloomBit:0u);
         if(supports_ntsc)config=(config&~NtscBit)|(ntsc?NtscBit:0u);
@@ -58,7 +61,7 @@ struct Ui16CrtSettings {
         return (config&~mask)|((std::uint32_t(active)<<16)&mask);
     }
     bool operator==(const Ui16CrtSettings &v)const{return flags()==v.flags() && widths==v.widths && glow==v.glow &&
-        persistence==v.persistence && bloom==v.bloom && ntsc==v.ntsc && convergence==v.convergence && curvature==v.curvature && composite==v.composite && composite_blur==v.composite_blur && composite_bleed==v.composite_bleed;}
+        spot==v.spot && persistence==v.persistence && bloom==v.bloom && ntsc==v.ntsc && convergence==v.convergence && curvature==v.curvature && composite==v.composite && composite_blur==v.composite_blur && composite_bleed==v.composite_bleed;}
     bool operator!=(const Ui16CrtSettings &v)const{return !(*this==v);}
 };
 struct Ui16CrtRecommendation {bool present=false;Ui16CrtSettings settings;};

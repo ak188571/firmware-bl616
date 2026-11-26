@@ -277,6 +277,25 @@ int main(int argc,char **argv){
     ui16_crt_set_width_sender(ui16_send_crt_widths,true,true,true,true,true,true);
     menu=launch(b);choose(*menu,5);choose(*menu,4);menu=launch(b);expect(0);
     std::printf("PASS system %u: Afterglow, Bloom independence, frame ACK, ROM save/restore, cancel, reset and old-core gating\n",system);
+    ui16_crt_set_width_sender(ui16_send_crt_widths,true,true,true,true,true,true,true);
+    menu=launch(a);expect(19);choose(*menu,0);line(*menu,13,"BEAMSPOT OFF");
+    menu=launch(b);choose(*menu,1);choose(*menu,0);change(*menu,13);
+    line(*menu,13,"BEAMSPOT ON");assert(config & Ui16CrtSettings::SpotBit);
+    menu->on_info(0x0008);
+    ui16_crt_accept_status(config ^ Ui16CrtSettings::SpotBit);menu->on_tick(42);line(*menu,3,"WAITING");
+    ui16_crt_accept_status(config);menu->on_tick(43);line(*menu,3,"FRAME ACK");
+    menu->on_info(0x0008);
+    assert(menu->on_close());expect(0);
+    menu=launch(b);choose(*menu,1);choose(*menu,0);change(*menu,13);
+    choose(*menu,0);choose(*menu,0);choose(*menu,4);line(*menu,4,"SAVE OK");
+    menu=launch(a);expect(19);menu=launch(b);assert(config==(0x10123u | Ui16CrtSettings::SpotBit));
+    choose(*menu,0);line(*menu,13,"BEAMSPOT ON");line(*menu,1,"BEAM OFF");
+    ui16_crt_set_width_sender(ui16_send_crt_widths,true,true,true,true,true,true);
+    menu=launch(a);choose(*menu,0);
+    assert(menu->get_options().back()==12 && !menu->on_adjust(13,1) && (config & Ui16CrtSettings::SpotBit));
+    ui16_crt_set_width_sender(ui16_send_crt_widths,true,true,true,true,true,true,true);
+    menu=launch(b);choose(*menu,5);choose(*menu,4);menu=launch(b);expect(0);
+    std::printf("PASS system %u: beam spot, legacy OFF, frame ACK, independent ROM saves, reset/cancel and old core\n",system);
     std::printf("PASS system %u: independent RGB/Composite controls, shared Glow, legacy RGB, per-ROM v5 save/reload, cancel, reset and preview navigation\n",system);
     std::printf("PASS system %u: Glow toggle and frame ACK, old-core gating, schema 1/3/4 ROM A/B reload, cancel/reset\n",system);
 }

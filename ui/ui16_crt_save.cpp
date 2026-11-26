@@ -23,7 +23,7 @@ bool ui16_save_crt_override(const Ui16RomIdentity &id,const Ui16CrtSettings &val
     // Keep legacy-only values and RESET readable by older firmware. The extension
     // represents a USER record; its widths and flags share the same CRC and slot.
     const auto flags=value.flags();
-    if(!reset && (signal || value.persistence || value.bloom || value.glow || (flags & ~31u) || value.widths!=Ui16CrtSettings{}.widths)){
+    if(!reset && (signal || value.spot || value.persistence || value.bloom || value.glow || (flags & ~31u) || value.widths!=Ui16CrtSettings{}.widths)){
         record[4]=value.glow?UI16_CRT_GLOW_RECORD:UI16_CRT_EXT_RECORD;
         if(signal){
             record[4]=value.ntsc?UI16_CRT_NTSC_RECORD:value.convergence?UI16_CRT_CONVERGENCE_RECORD:value.curvature?UI16_CRT_CURVE_RECORD:UI16_CRT_SIGNAL_RECORD;
@@ -31,6 +31,7 @@ bool ui16_save_crt_override(const Ui16RomIdentity &id,const Ui16CrtSettings &val
                       (unsigned(value.composite_bleed)<<5) | (unsigned(value.glow)<<6);
             if((value.ntsc || value.convergence) && value.curvature)record[5]|=0x80;
         }
+        if(value.spot)record[4]|=UI16_CRT_SPOT_FLAG;
         if(value.persistence)record[4]|=UI16_CRT_PERSISTENCE_FLAG;
         if(value.bloom)record[4]|=UI16_CRT_BLOOM_FLAG;
         put(6,flags,2);
