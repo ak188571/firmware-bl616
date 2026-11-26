@@ -20,6 +20,10 @@ struct Ui16OsdStyle {
     const char *title=nullptr;
     const char *footer=nullptr;
     bool short_position=false;
+    int maximum_width=27;
+    int maximum_lines=21;
+    bool corner_only=false;
+    bool informational=false;
 };
 Ui16OsdFrame ui16_osd_layout(const Ui16OsdCanvas &,const std::vector<int> &options,
     int selected,int &top,int &width_floor,Ui16OsdPosition position, bool movable=true, const char *title="MENU",const Ui16OsdStyle *style=nullptr);

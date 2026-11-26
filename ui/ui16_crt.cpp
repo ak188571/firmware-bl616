@@ -34,6 +34,24 @@ const char *strength(unsigned n) {
     static const char *const names[]={"OFF","WEAK","STD","STRONG"};
     return names[n&3u];
 }
+const char *read_status(Ui16CrtReadState state) {
+    switch(state){
+    case Ui16CrtReadState::Recovered:return "RECOV.";
+    case Ui16CrtReadState::Bad:return "BAD REC";
+    case Ui16CrtReadState::Io:return "I/O ERR";
+    case Ui16CrtReadState::Future:return "NEW FMT";
+    case Ui16CrtReadState::Conflict:return "CLASH";
+    case Ui16CrtReadState::NoId:return "NO ID";
+    default:return ui16_crt_read_name(state);
+    }
+}
+const char *defaults_status(Ui16CrtDefaultsState state) {
+    switch(state){
+    case Ui16CrtDefaultsState::Io:return "I/O ERR";
+    case Ui16CrtDefaultsState::Unavailable:return "N/A";
+    default:return ui16_crt_defaults_state_name(state);
+    }
+}
 struct CrtMenu:Menu {
     explicit CrtMenu(bool blur,bool scan):blur_supported(blur),scan_supported(blur&&scan),extended(send_widths!=nullptr){}
     const bool blur_supported,scan_supported,extended;
@@ -43,10 +61,12 @@ struct CrtMenu:Menu {
     enum Page { Main, Effects, Crop };
     Page page=Main;
     int signal_option()const{return (storage_actions_disabled()?4:6)-int(blur_supported&&!scan_supported);}
-    int osd_width()const override{return info?21:13;}
+    static constexpr int text_width=12; // 15 columns including the frame and cursor.
+    static constexpr int visible_rows=8; // At most 13 rows including navigation.
+    int osd_width()const override{return text_width;}
     const Ui16OsdStyle *osd_style()const override{
-        static const Ui16OsdStyle normal{13,"CRT X/Y:BACK","START:INFO",true};
-        static const Ui16OsdStyle details{13,"CRT X/Y:BACK","START:HIDE",true};
+        static const Ui16OsdStyle normal{text_width,"CRT X/Y:BACK","START:INFO",true,text_width,visible_rows,true};
+        static const Ui16OsdStyle details{text_width,"INFO X/Y:OUT","START:HIDE",true,text_width,visible_rows,true,true};
         return info?&details:&normal;
     }
     bool on_info(std::uint16_t buttons)override{
@@ -56,9 +76,21 @@ struct CrtMenu:Menu {
     void render()override {
         overlay_clear();
         int y=0;
+        if(info){
+            overlay_cursor(0,y++);overlay_printf("%s",read_only?"SAVE R/O":preview_only?"SAVE N/A":save_failed?"SAVE FAILED":dirty()?"SAVE UNSAVED":(saved_user||persisted_reset)?"SAVE OK":"SAVE PRESET");
+            // The source and read status are the ROM-load snapshot.
+            overlay_cursor(0,y++);overlay_printf("SRC %s",restored.override_value.present?"USER":recommended_source);
+            overlay_cursor(0,y++);overlay_printf("READ %s",preview_only?"N/A":read_status(restored.state));
+            overlay_cursor(0,y++);overlay_printf("%s",matched?"FRAME ACK":"CFG WAITING");
+            overlay_cursor(0,y++);if(identity.valid)overlay_printf("ID %08lx",static_cast<unsigned long>(identity.crc));
+            else overlay_printf("ID N/A");
+            overlay_cursor(0,y++);overlay_printf("DEF %s",defaults_status(defaults_snapshot.state));
+            overlay_cursor(0,y);overlay_printf("RESET PRESET");
+            return;
+        }
         if(extended){
             static const char *const names[]={"MAIN","EFFECTS","OVERSCAN"};
-            overlay_cursor(0,y++);overlay_printf("PAGE %d/3 %s",int(page)+1,names[page]);
+            overlay_cursor(0,y++);overlay_printf("%d/3 %s",int(page)+1,names[page]);
         }
         if(page==Main){
             overlay_cursor(0,y++);overlay_printf("%s %s",blur_supported?"CRT  ":"CRT REQ",settings.enabled?"ON":"OFF");
@@ -66,40 +98,30 @@ struct CrtMenu:Menu {
             overlay_cursor(0,y++);overlay_printf("SCAN %s",blur_supported&&!scan_supported?"N/A":strength(settings.scanline));
             overlay_cursor(0,y++);overlay_printf("%s",storage_actions_disabled()?"SAVE N/A":save_failed?"SAVE FAILED":dirty()?"SAVE *":(saved_user||persisted_reset)?"SAVE OK":"SAVE");
             overlay_cursor(0,y++);overlay_printf("%s",reset_available()?"RESET":"RESET N/A");
-            if(extended){overlay_cursor(0,y++);overlay_printf("SIGNAL %s",settings.ntsc && ntsc_supported?"NTSC":settings.composite?"COMPOSITE":"RGB");}
+            if(extended){overlay_cursor(0,y++);overlay_printf("SIGNAL %s",settings.ntsc && ntsc_supported?"NTSC":settings.composite?"COMP.":"RGB");}
         }else if(page==Effects){
-            static const char *const masks[]={"OFF","APERTURE GRILLE","SHADOW MASK"};
+            static const char *const masks[]={"OFF","GRILLE","SHADOW"};
             static const char *const gamma[]={"OFF","0.80","1.25"};
             static const char *const temperatures[]={"OFF","WARM","COOL"};
-            overlay_cursor(0,y++);overlay_printf("BEAM SCAN %s",settings.beam?"ON":"OFF");
+            overlay_cursor(0,y++);overlay_printf("BEAM %s",settings.beam?"ON":"OFF");
             overlay_cursor(0,y++);overlay_printf("MASK %s",masks[settings.mask]);
             overlay_cursor(0,y++);overlay_printf("GAMMA %s",gamma[settings.gamma]);
-            overlay_cursor(0,y++);overlay_printf("WHITE POINT %s",temperatures[settings.temperature]);
+            overlay_cursor(0,y++);overlay_printf("WHITE %s",temperatures[settings.temperature]);
             overlay_cursor(0,y++);overlay_printf("VIGNETTE %s",settings.vignette?"ON":"OFF");
             overlay_cursor(0,y++);overlay_printf("CORNERS %s",settings.rounded?"ON":"OFF");
-            overlay_cursor(0,y++);overlay_printf("CHROMA BLEED %s",settings.signal_bleed()?"ON":"OFF");
+            overlay_cursor(0,y++);overlay_printf("BLEED %s",settings.signal_bleed()?"ON":"OFF");
             if(glow_supported){overlay_cursor(0,y++);overlay_printf("GLOW %s",settings.glow?"ON":"OFF");}
-            if(curve_supported){overlay_cursor(0,y++);overlay_printf("CURVATURE %s",settings.curvature?"ON":"OFF");}
-            if(convergence_supported){overlay_cursor(0,y++);overlay_printf("CONVERGENCE %s",settings.convergence?"ON":"OFF");}
+            if(curve_supported){overlay_cursor(0,y++);overlay_printf("CURVE %s",settings.curvature?"ON":"OFF");}
+            if(convergence_supported){overlay_cursor(0,y++);overlay_printf("CONVERG. %s",settings.convergence?"ON":"OFF");}
             if(bloom_supported){overlay_cursor(0,y++);overlay_printf("BLOOM %s",settings.bloom?"ON":"OFF");}
-            if(persistence_supported){overlay_cursor(0,y++);overlay_printf("AFTERGLOW %s",settings.persistence?"ON":"OFF");}
+            if(persistence_supported){overlay_cursor(0,y++);overlay_printf("AFTRGLW %s",settings.persistence?"ON":"OFF");}
         }else{
             static const char *const edges[]={"TOP","BOTTOM","LEFT","RIGHT"};
             overlay_cursor(0,y++);overlay_printf("OVERSCAN %s",settings.overscan?"ON":"OFF");
             for(unsigned i=0;i<4;++i){
-                overlay_cursor(0,y++);overlay_printf("%s %u PX",edges[i],unsigned(settings.widths[i]));
+                overlay_cursor(0,y++);overlay_printf("%-6s:%3uPX",edges[i],unsigned(settings.widths[i]));
             }
         }
-        if(!info)return;
-        overlay_cursor(0,y++);overlay_printf("SAVE: %s",read_only?"READ ONLY":preview_only?"UNAVAILABLE":save_failed?"FAILED":dirty()?"UNSAVED":(saved_user||persisted_reset)?"SAVED":"RECOMMENDED");
-        // These describe the ROM-load snapshot; SAVE above is the live state.
-        overlay_cursor(0,y++);overlay_printf("LOADED FROM: %s",restored.override_value.present?"USER":recommended_source);
-        overlay_cursor(0,y++);overlay_printf("SAVE READ: %s",preview_only?"UNAVAILABLE":ui16_crt_read_name(restored.state));
-        overlay_cursor(0,y++);overlay_printf("%s: %s",extended?"CONFIG":"APPLY",matched?"FRAME ACK":"WAITING");
-        overlay_cursor(0,y++);if(identity.valid)overlay_printf("ROM ID: %08lx",static_cast<unsigned long>(identity.crc));
-        else overlay_printf("ROM ID: UNAVAILABLE");
-        overlay_cursor(0,y++);overlay_printf("DEFAULTS: %s",ui16_crt_defaults_state_name(defaults_snapshot.state));
-        overlay_cursor(0,y);overlay_printf("RESET = RECOMMENDED");
     }
     std::vector<int> get_options()override{
         if(page==Effects){

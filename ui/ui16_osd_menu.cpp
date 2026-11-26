@@ -8,7 +8,10 @@
 #include "utils.h"
 #include <algorithm>
 
-namespace { Ui16OsdPosition position=Ui16OsdPosition::TopRight; }
+namespace {
+Ui16OsdPosition position=Ui16OsdPosition::TopRight;
+Ui16OsdPosition corner_position=Ui16OsdPosition::TopRight;
+}
 void ui16_osd_menu_input_loop(bool fixed_center,const char *title,bool dual_osd)
 {
     if(!menu_is_active())return;
@@ -29,6 +32,9 @@ void ui16_osd_menu_input_loop(bool fixed_center,const char *title,bool dual_osd)
             top=0;width_floor=menu->osd_width();dirty=true;displayed_valid=false;
         }
         if(menu->on_tick(static_cast<std::uint32_t>(bflb_mtimer_get_time_ms())))dirty=true;
+        const auto *style=menu->osd_style();
+        const bool corner_only=style&&style->corner_only;
+        auto &popup_position=corner_only?corner_position:position;
         if(dirty||menu->redraw){
             const auto updated=menu->get_options();
             if(updated!=options){
@@ -36,7 +42,7 @@ void ui16_osd_menu_input_loop(bool fixed_center,const char *title,bool dual_osd)
                 nav=Ui16Navigation(options.size()+(fixed_center?0:1),selected);
             }
             overlay_osd_capture_begin();menu->render();overlay_osd_capture_end();
-            const auto frame=ui16_osd_layout(ui16_osd_canvas(),options,nav.selected(),top,width_floor,fixed_center?Ui16OsdPosition::Center:position,!fixed_center,title,menu->osd_style());
+            const auto frame=ui16_osd_layout(ui16_osd_canvas(),options,nav.selected(),top,width_floor,fixed_center?Ui16OsdPosition::Center:popup_position,!fixed_center,title,style);
             const bool same_geometry=displayed_valid && frame.x==displayed.x && frame.y==displayed.y &&
                 frame.width==displayed.width && frame.height==displayed.height;
             // Keep the current window visible. Send only changed character runs
@@ -83,13 +89,16 @@ void ui16_osd_menu_input_loop(bool fixed_center,const char *title,bool dual_osd)
             top=0;width_floor=menu->osd_width();dirty=true;
             delay(10);continue;
         }
+        if(style&&style->informational){delay(10);continue;}
         const auto now=static_cast<std::uint32_t>(bflb_mtimer_get_time_ms());
         if(nav.update(buttons,now))dirty=true;
         const bool left=(pressed&0x40)!=0,right=(pressed&0x80)!=0;
         if(left!=right){
             const int delta=right?1:-1;
             if(!fixed_center && nav.selected()==static_cast<int>(options.size())){
-                position=static_cast<Ui16OsdPosition>((static_cast<int>(position)+delta+5)%5);dirty=true;
+                const int index=static_cast<int>(popup_position);
+                popup_position=static_cast<Ui16OsdPosition>(corner_only?(index-1+delta+4)%4+1:(index+delta+5)%5);
+                dirty=true;
             }else if(menu->on_adjust(nav.selected(),delta))dirty=true;
         }
         if(!conflict&&(pressed&UI16_BUTTON_CONFIRM)&&nav.selected()<static_cast<int>(options.size())){

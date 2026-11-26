@@ -45,6 +45,9 @@ static unsigned saves=0;static bool save_ok=true;
 static Ui16CrtSettings saved_value;static bool saved_reset=false;
 bool save_test(const Ui16RomIdentity &id,const Ui16CrtSettings &value,bool reset){assert(id.valid);++saves;saved_value=value;saved_reset=reset;return save_ok;}
 // Read optional diagnostic fields without changing the default compact view.
+static void capture(Menu &menu){
+    ui16_osd_capture_begin();menu.render();ui16_osd_capture_end();
+}
 static void capture_info(Menu &menu){
     assert(menu.on_info());ui16_osd_capture_begin();menu.render();ui16_osd_capture_end();assert(menu.on_info());
 }
@@ -54,6 +57,17 @@ static Ui16OsdFrame frame(Menu &menu,Ui16OsdPosition position=Ui16OsdPosition::T
 }
 static std::string visible(const std::array<char,32*28> &cells,unsigned x,unsigned y,unsigned width,unsigned height){
     std::string text;for(unsigned row=y;row<y+height;++row)text+=std::string(cells.data()+row*32+x,width)+'\n';return text;
+}
+static void check_quadrant(unsigned x,unsigned y,unsigned width,unsigned height){
+    assert(width<=15&&height<=13);
+    assert(x<16?x+width<=16:x+width<=32);
+    assert(y<14?y+height<=14:y+height<=28);
+}
+static void check_quadrant(const Ui16OsdFrame &f){check_quadrant(f.x,f.y,f.width,f.height);}
+static void check_unclipped_text(){
+    const auto &text=ui16_osd_canvas().cells;
+    for(int row=0;row<Ui16OsdCanvas::Rows;++row)
+        for(int column=12;column<32;++column)assert(text[row*32+column]==' ');
 }
 int main(){
     assert(ui16_osd_request(0x84,0)==Ui16GameOsd::System);
@@ -73,7 +87,7 @@ int main(){
     ui16_crt_accept_status(config);assert(menu->on_tick(10));
     capture_info(*menu);
     const auto &cells=ui16_osd_canvas().cells;
-    assert(std::string(cells.data()+8*32,16).find("FRAME ACK")!=std::string::npos);
+    assert(std::string(cells.data()+3*32,16).find("FRAME ACK")!=std::string::npos);
     // Opening the opposite OSD must neither switch ownership nor adjust a value.
     menu_clear();push_menu(std::move(menu));_overlay_on=1;at=0;boxes.clear();
     pads={0x84,0,0x200};
@@ -93,10 +107,11 @@ int main(){
     assert(blur_menu->on_adjust(1,1));assert(config==(preserved|0x30000));
     assert(!blur_menu->on_adjust(2,1));assert(config==(preserved|0x30000));
     ui16_crt_accept_status(config);assert(blur_menu->on_tick(20));
-    capture_info(*blur_menu);
+    capture(*blur_menu);
     const auto &blur_cells=ui16_osd_canvas().cells;
     assert(std::string(blur_cells.data()+2*32,32).find("N/A")!=std::string::npos);
-    assert(std::string(blur_cells.data()+8*32,32).find("FRAME ACK")!=std::string::npos);
+    capture_info(*blur_menu);
+    assert(std::string(blur_cells.data()+3*32,32).find("FRAME ACK")!=std::string::npos);
     _overlay_on=1;assert(!blur_menu->on_choose(2)&&overlay_on());
     ui16_crt_new_session();assert(config==preserved);
     std::unique_ptr<Menu> scan_menu(ui16_create_crt_menu(true,true));
@@ -108,10 +123,11 @@ int main(){
     }
     assert(scan_menu->on_adjust(2,-1));assert(config==(preserved|0x1b0000));
     ui16_crt_accept_status(config);assert(scan_menu->on_tick(30));
-    capture_info(*scan_menu);
+    capture(*scan_menu);
     const auto &scan_cells=ui16_osd_canvas().cells;
     assert(std::string(scan_cells.data()+2*32,32).find("STRONG")!=std::string::npos);
-    assert(std::string(scan_cells.data()+8*32,32).find("FRAME ACK")!=std::string::npos);
+    capture_info(*scan_menu);
+    assert(std::string(scan_cells.data()+3*32,32).find("FRAME ACK")!=std::string::npos);
     assert(!scan_menu->on_choose(3)&&overlay_on());
     ui16_crt_new_session();assert(config==preserved);
     // A lost transfer must recover without another controller operation.
@@ -137,8 +153,8 @@ int main(){
     std::unique_ptr<Menu> preset_menu(ui16_create_crt_menu(true,true));
     assert(!preset_menu->on_tick(3001)); // A previous game's ACK must be cleared.
     capture_info(*preset_menu);
-    assert(std::string(ui16_osd_canvas().cells.data()+6*32,32).find("LOADED FROM: CSV")!=std::string::npos);
-    assert(std::string(ui16_osd_canvas().cells.data()+8*32,32).find("WAITING")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+1*32,32).find("SRC CSV")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+3*32,32).find("WAITING")!=std::string::npos);
     ui16_crt_accept_status(config);assert(preset_menu->on_tick(3010));
     assert(preset_menu->on_adjust(1,1));const auto edited=config;
     assert(!preset_menu->on_choose(3));
@@ -146,29 +162,29 @@ int main(){
     assert(config==edited); // The initial preset is not reapplied on menu creation.
     ui16_crt_new_session();assert(config==preserved); // A different game with no CSV is OFF.
     capture_info(*preset_menu);
-    assert(std::string(ui16_osd_canvas().cells.data()+6*32,32).find("LOADED FROM: BUILT-IN")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+1*32,32).find("SRC BUILT-IN")!=std::string::npos);
     ui16_crt_new_session({false,{true,3,3}});assert(config==preserved);
     ui16_crt_new_session({true,{true,4,2}});assert(config==preserved);
     ui16_crt_new_session({true,{true,1,4}});assert(config==preserved);
     ui16_crt_new_session({true,{false,0,0}});assert(config==preserved);
     capture_info(*preset_menu);
-    assert(std::string(ui16_osd_canvas().cells.data()+6*32,32).find("LOADED FROM: CSV")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+1*32,32).find("SRC CSV")!=std::string::npos);
     ui16_crt_new_session(recommended);assert(config==recommended.settings.merge(preserved));
     const Ui16RomIdentity rom_id{true,Ui16RomVolume::Sd,1,0xabcdef01,65552};
     ui16_crt_new_session(recommended,rom_id);
     capture_info(*preset_menu);
-    assert(std::string(ui16_osd_canvas().cells.data()+9*32,32).find("ROM ID: abcdef01")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+4*32,32).find("ID abcdef01")!=std::string::npos);
     assert(!preset_menu->on_choose(3));preset_menu.reset(ui16_create_crt_menu(true,true));
     capture_info(*preset_menu);
-    assert(std::string(ui16_osd_canvas().cells.data()+9*32,32).find("abcdef01")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+4*32,32).find("abcdef01")!=std::string::npos);
     ui16_crt_new_session(recommended);assert(config==recommended.settings.merge(preserved));
     capture_info(*preset_menu);
-    assert(std::string(ui16_osd_canvas().cells.data()+9*32,32).find("UNAVAILABLE")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+4*32,32).find("N/A")!=std::string::npos);
     const Ui16CrtRestore saved{Ui16CrtReadState::User,{true,{true,3,3}}};
     ui16_crt_new_session(recommended,rom_id,saved);assert(config==saved.override_value.settings.merge(preserved));
     capture_info(*preset_menu);
-    assert(std::string(ui16_osd_canvas().cells.data()+6*32,32).find("LOADED FROM: USER")!=std::string::npos);
-    assert(std::string(ui16_osd_canvas().cells.data()+7*32,32).find("SAVE READ: USER")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+1*32,32).find("SRC USER")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+2*32,32).find("READ USER")!=std::string::npos);
     assert(preset_menu->on_adjust(1,1));const auto restored_edit=config;
     assert(!preset_menu->on_choose(3));preset_menu.reset(ui16_create_crt_menu(true,true));assert(config==restored_edit);
     ui16_crt_new_session(recommended,rom_id,{Ui16CrtReadState::Reset,{}});assert(config==recommended.settings.merge(preserved));
@@ -186,12 +202,12 @@ int main(){
     assert(preset_menu->on_adjust(1,1));assert(!preset_menu->on_choose(3)&&saves==2&&overlay_on());
     const auto successful=config;
     capture_info(*preset_menu);
-    assert(std::string(ui16_osd_canvas().cells.data()+5*32,32).find("SAVE: SAVED")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+0*32,32).find("SAVE OK")!=std::string::npos);
     assert(preset_menu->on_adjust(2,1));save_ok=false;
     assert(!preset_menu->on_choose(3)&&saves==3&&overlay_on());
     assert((preset_menu->get_options()==std::vector<int>{0,1,2,3,4}));
     capture_info(*preset_menu);
-    assert(std::string(ui16_osd_canvas().cells.data()+5*32,32).find("SAVE: FAILED")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+0*32,32).find("SAVE FAILED")!=std::string::npos);
     save_ok=true;assert(!preset_menu->on_choose(3)&&saves==4&&overlay_on()); // Retry stays open too.
     const auto retry_saved=config;
     assert(preset_menu->on_adjust(1,1));assert(config!=retry_saved);
@@ -213,7 +229,7 @@ int main(){
     assert(!preset_menu->on_choose(4)&&saves==before_reset);
     assert(config==recommended.settings.merge(preserved));
     capture_info(*preset_menu);
-    assert(std::string(ui16_osd_canvas().cells.data()+5*32,32).find("UNSAVED")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+0*32,32).find("UNSAVED")!=std::string::npos);
     assert(preset_menu->on_close()&&config==saved.override_value.settings.merge(preserved)&&saves==before_reset);
     assert(!preset_menu->on_choose(4));assert(!preset_menu->on_choose(3));
     assert(saves==before_reset+1&&saved_reset&&saved_value==recommended.settings&&overlay_on()==1);
@@ -224,7 +240,7 @@ int main(){
     ui16_crt_new_session(recommended,rom_id,{Ui16CrtReadState::User,recommended},save_test);
     assert(!preset_menu->on_choose(4));
     capture_info(*preset_menu);
-    assert(std::string(ui16_osd_canvas().cells.data()+5*32,32).find("UNSAVED")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+0*32,32).find("UNSAVED")!=std::string::npos);
     assert(!preset_menu->on_choose(3)&&saved_reset);
     const Ui16CrtRecommendation changed_csv{true,{false,2,3}};
     ui16_crt_new_session(changed_csv,rom_id,{Ui16CrtReadState::Reset,{},1,9},save_test);
@@ -250,8 +266,8 @@ int main(){
     const Ui16CrtDefaults global_defaults{Ui16CrtDefaultsState::Ready,Ui16CrtDefaultsSource::Global,{true,{true,1,3}}};
     ui16_crt_new_session({},rom_id,{},save_test,system_defaults);assert(config==system_defaults.recommendation.settings.merge(preserved));
     capture_info(*preset_menu);
-    assert(std::string(ui16_osd_canvas().cells.data()+6*32,32).find("LOADED FROM: SYSTEM")!=std::string::npos);
-    assert(std::string(ui16_osd_canvas().cells.data()+10*32,32).find("DEFAULTS: OK")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+1*32,32).find("SRC SYSTEM")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+5*32,32).find("DEF OK")!=std::string::npos);
     ui16_crt_new_session({},rom_id,{Ui16CrtReadState::Reset,{},0,3},save_test,global_defaults);
     assert(config==global_defaults.recommendation.settings.merge(preserved));
     ui16_crt_new_session(recommended,rom_id,{},save_test,system_defaults);assert(config==recommended.settings.merge(preserved));
@@ -267,7 +283,7 @@ int main(){
     auto broken_defaults=system_defaults;broken_defaults.state=Ui16CrtDefaultsState::Bad;
     ui16_crt_new_session({},rom_id,{},save_test,broken_defaults);assert(config==preserved);
     capture_info(*preset_menu);
-    assert(std::string(ui16_osd_canvas().cells.data()+10*32,32).find("BAD FILE")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+5*32,32).find("BAD FILE")!=std::string::npos);
     ui16_crt_new_session(recommended,rom_id,saved,save_test,broken_defaults);assert(config==saved.override_value.settings.merge(preserved));
     assert(!preset_menu->on_choose(4)&&config==recommended.settings.merge(preserved));
     broken_defaults=system_defaults;broken_defaults.recommendation.settings.blur=4;
@@ -284,10 +300,10 @@ int main(){
         assert(!ro->on_choose(3)&&!ro->on_choose(4)&&saves==before_readonly&&config==baseline);
         capture_info(*ro);
         const auto &frame=ui16_osd_canvas().cells;
-        assert(std::string(frame.data()+5*32,32).find("READ ONLY")!=std::string::npos);
-        assert(std::string(frame.data()+6*32,32).find(user?"USER":"CSV")!=std::string::npos);
-        assert(std::string(frame.data()+9*32,32).find("UNAVAILABLE")==std::string::npos);
-        assert(std::string(frame.data()+10*32,32).find("DEFAULTS: OK")!=std::string::npos);
+        assert(std::string(frame.data()+0*32,32).find("SAVE R/O")!=std::string::npos);
+        assert(std::string(frame.data()+1*32,32).find(user?"USER":"CSV")!=std::string::npos);
+        assert(std::string(frame.data()+4*32,32).find("N/A")==std::string::npos);
+        assert(std::string(frame.data()+5*32,32).find("DEF OK")!=std::string::npos);
         assert(!ro->inline_choice(3)&&!ro->inline_choice(4));
         assert(ro->on_adjust(2,1)&&config!=baseline);
         assert(ro->on_close()&&config==baseline&&saves==before_readonly);
@@ -302,7 +318,7 @@ int main(){
     const auto before_snes_save=saves;const auto snes_initial=config;
     assert((snes_menu->get_options()==std::vector<int>{0,1,2,3,4}));
     assert(snes_menu->inline_choice(4)&&config==snes_initial);
-    capture_info(*snes_menu);
+    capture(*snes_menu);
     assert(std::string(ui16_osd_canvas().cells.data()+4*32,32).find("RESET")!=std::string::npos);
     assert(snes_menu->on_adjust(1,1));_overlay_on=1;save_ok=true;
     assert(!snes_menu->on_choose(3)&&saves==before_snes_save+1&&!saved_reset&&overlay_on());
@@ -311,7 +327,7 @@ int main(){
     assert(snes_menu->on_adjust(2,1));save_ok=false;
     assert(!snes_menu->on_choose(3)&&saves==before_snes_save+2&&overlay_on());
     capture_info(*snes_menu);
-    assert(std::string(ui16_osd_canvas().cells.data()+5*32,32).find("FAILED")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+0*32,32).find("FAILED")!=std::string::npos);
     assert(snes_menu->on_close()&&config==snes_success); // Failed SAVE cancels to last confirmed value.
     assert(snes_menu->on_adjust(2,1));save_ok=true;
     assert(!snes_menu->on_choose(3)&&saves==before_snes_save+3&&!saved_reset);
@@ -336,7 +352,7 @@ int main(){
     const auto before_equal=saves;
     assert(!snes_menu->on_choose(4)&&config==recommended.settings.merge(preserved));
     capture_info(*snes_menu);
-    assert(std::string(ui16_osd_canvas().cells.data()+5*32,32).find("UNSAVED")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+0*32,32).find("UNSAVED")!=std::string::npos);
     assert(!snes_menu->on_choose(3)&&saved_reset&&saves==before_equal+1);
     // On the next launch a Reset record follows current CSV/SYSTEM/GLOBAL/builtin.
     const Ui16CrtRestore reset_record{Ui16CrtReadState::Reset,{},1,4};
@@ -349,8 +365,8 @@ int main(){
         assert(config==expected.merge(preserved));const auto before_reloaded=saves;
         assert(!snes_menu->on_choose(3)&&saves==before_reloaded);
         capture_info(*snes_menu);
-        assert(std::string(ui16_osd_canvas().cells.data()+6*32,32).find(source==0?"CSV":source==1?"SYSTEM":source==2?"GLOBAL":"BUILT-IN")!=std::string::npos);
-        assert(std::string(ui16_osd_canvas().cells.data()+7*32,32).find("RESET")!=std::string::npos);
+        assert(std::string(ui16_osd_canvas().cells.data()+1*32,32).find(source==0?"CSV":source==1?"SYSTEM":source==2?"GLOBAL":"BUILT-IN")!=std::string::npos);
+        assert(std::string(ui16_osd_canvas().cells.data()+2*32,32).find("RESET")!=std::string::npos);
     }
     // A failed Reset SAVE cancels through the real X/Y paths to the prior USER.
     for(unsigned back:{0x200u,0x2u}){
@@ -384,8 +400,8 @@ int main(){
     assert(!preview->on_choose(3)&&!preview->on_choose(4));
     assert(config==preview_value&&saves==saves_before_preview);
     capture_info(*preview);
-    for(int row:{5,7,9,10})assert(std::string(ui16_osd_canvas().cells.data()+row*32,32).find("UNAVAILABLE")!=std::string::npos);
-    assert(std::string(ui16_osd_canvas().cells.data()+6*32,32).find("BUILT-IN")!=std::string::npos);
+    for(int row:{0,2,4,5})assert(std::string(ui16_osd_canvas().cells.data()+row*32,32).find("N/A")!=std::string::npos);
+    assert(std::string(ui16_osd_canvas().cells.data()+1*32,32).find("BUILT-IN")!=std::string::npos);
     assert(preview->on_close()&&config==preserved);
     // Reopening stays volatile; returning to NES restores its existing policy.
     preview.reset(ui16_create_crt_menu());assert((preview->get_options()==std::vector<int>{0,1,2}));
@@ -393,7 +409,7 @@ int main(){
     assert((preview->get_options()==std::vector<int>{0,1}));
     assert(!preview->on_adjust(2,1)&&!preview->on_choose(2)&&!preview->on_choose(3));
     assert(config==preserved&&saves==saves_before_preview);
-    capture_info(*preview);
+    capture(*preview);
     assert(std::string(ui16_osd_canvas().cells.data()+2*32,32).find("N/A")!=std::string::npos);
     assert(preview->on_adjust(0,1)&&preview->on_adjust(1,1));
     assert(preview->on_close()&&config==preserved&&saves==saves_before_preview);
@@ -414,17 +430,19 @@ int main(){
         const auto no_edit=config;const auto no_save=saves;
         for(unsigned pos=0;pos<5;++pos){
             const auto small=frame(*compact,static_cast<Ui16OsdPosition>(pos));
-            assert(small.width==16&&small.height==10&&small.x+small.width<=31&&small.y+small.height<=27);
+            check_quadrant(small);check_unclipped_text();
+            assert(small.width==15&&small.height==10);
             assert(small.width*small.height*100<26*17*40); // More than 60% smaller than the previous normal window.
             const auto text=visible(small.cells,small.x,small.y,small.width,small.height);
             assert(text.find("CRT X/Y:BACK")!=std::string::npos&&text.find("START:INFO")!=std::string::npos);
             assert(text.find("SAVE OK")!=std::string::npos&&text.find("RESET")!=std::string::npos);
-            for(const char *hidden:{"ROM ID","LOADED FROM","SAVE READ:","APPLY:","DEFAULTS:","STAGE"})assert(text.find(hidden)==std::string::npos);
+            for(const char *hidden:{"ID ","SRC ","READ ","FRAME ACK","DEF ","STAGE"})assert(text.find(hidden)==std::string::npos);
             if(value.blur==2||value.scanline==2)assert(text.find("STD")!=std::string::npos&&text.find("STANDARD")==std::string::npos);
             assert(compact->on_info());const auto expanded=frame(*compact,static_cast<Ui16OsdPosition>(pos));
-            assert(expanded.width==24&&expanded.height==17);
+            check_quadrant(expanded);check_unclipped_text();
+            assert(expanded.width==15&&expanded.height==11);
             const auto info=visible(expanded.cells,expanded.x,expanded.y,expanded.width,expanded.height);
-            for(const char *shown:{"ROM ID: abcdef01","LOADED FROM: USER","SAVE READ: USER","APPLY: FRAME ACK","DEFAULTS: MISSING","RESET = RECOMMENDED","START:HIDE"})assert(info.find(shown)!=std::string::npos);
+            for(const char *shown:{"ID abcdef01","SRC USER","READ USER","FRAME ACK","DEF MISSING","RESET PRESET","START:HIDE"})assert(info.find(shown)!=std::string::npos);
             assert(compact->on_info());const auto shrunk=frame(*compact,static_cast<Ui16OsdPosition>(pos));
             assert(shrunk.width==small.width&&shrunk.height==small.height&&config==no_edit&&saves==no_save);
         }
@@ -432,7 +450,7 @@ int main(){
             assert(compact->on_adjust(1,1));auto small=frame(*compact);
             assert(visible(small.cells,small.x,small.y,small.width,small.height).find("SAVE *")!=std::string::npos);
             save_ok=false;assert(!compact->on_choose(3));small=frame(*compact);
-            assert(small.width==16&&small.height==10);
+            assert(small.width==15&&small.height==10);
             assert(visible(small.cells,small.x,small.y,small.width,small.height).find("SAVE FAILED")!=std::string::npos);
             assert(compact->on_close()&&config==no_edit);save_ok=true;
         }
@@ -448,13 +466,13 @@ int main(){
         menu_clear();push_menu(std::move(popup));_overlay_on=1;at=0;boxes.clear();snapshots.clear();hardware.fill('?');
         pads={0x20,0,0x20,0,0x20,0,8,8,0,8,8,0,0x200};
         ui16_osd_menu_input_loop(false,"CRT SETTINGS",true);
-        assert(boxes.size()==3&&boxes[0][2]==16&&boxes[0][3]==10&&boxes[1][2]==24&&boxes[1][3]==17&&boxes[2]==boxes[0]);
+        assert(boxes.size()==3&&boxes[0][2]==15&&boxes[0][3]==10&&boxes[1][2]==15&&boxes[1][3]==11&&boxes[2]==boxes[0]);
         const auto a=boxes[0],b=boxes[1];
         auto initial=visible(snapshots[6],a[0],a[1],a[2],a[3]);
         auto detail=visible(snapshots[7],b[0],b[1],b[2],b[3]);
         auto returned=visible(snapshots[10],a[0],a[1],a[2],a[3]);
-        assert(initial.find(">SAVE OK")!=std::string::npos&&detail.find(">SAVE OK")!=std::string::npos&&returned==initial);
-        assert(detail.find("ROM ID:")!=std::string::npos&&initial.find("ROM ID:")==std::string::npos);
+        assert(initial.find(">SAVE OK")!=std::string::npos&&detail.find(">SAVE OK")==std::string::npos&&detail.find("SAVE OK")!=std::string::npos&&returned==initial);
+        assert(detail.find("ID ")!=std::string::npos&&initial.find("ID ")==std::string::npos);
         assert(!overlay_on()&&config==baseline&&saves==writes_before&&config_sends==sends_before);menu_clear();
         for(unsigned mixed:{0x109u,0x88u}){
             now=20000;ui16_crt_new_session({},id,saved,save_test);
@@ -479,7 +497,7 @@ int main(){
             pads.insert(pads.end(),{8,static_cast<std::uint16_t>(8|later),static_cast<std::uint16_t>(8|later),8,0,0x200});
             ui16_osd_menu_input_loop(false,"CRT SETTINGS",true);
             assert(saves==saves_before_later&&config_sends==sends_before_later+1&&config==baseline);
-            assert(boxes.size()==2&&boxes[0][2]==16&&boxes[1][2]==24);menu_clear();
+            assert(boxes.size()==2&&boxes[0][2]==15&&boxes[1][2]==15);menu_clear();
         }
         // Once START is fully released, intentional SAVE works. A subsequent
         // unchanged SAVE remains a no-op for both USER and Reset baselines.
@@ -494,7 +512,7 @@ int main(){
             pads={0x20,0,0x20,0,0x20,0,8,8,0,0x100,0x100,0,8,0,0x100,0,0x200};
             ui16_osd_menu_input_loop(false,"CRT SETTINGS",true);
             assert(saves==before_intentional+(reset_mode?0:1)&&config==expected_saved);
-            assert(!boxes.empty()&&boxes.back()[2]==16&&boxes.back()[3]==10);menu_clear();
+            assert(!boxes.empty()&&boxes.back()[2]==15&&boxes.back()[3]==10);menu_clear();
         }
     }
     // LOAD fields are snapshots, not the live SAVE status or its destination.
@@ -503,31 +521,33 @@ int main(){
         ui16_crt_new_session({},id,{Ui16CrtReadState::Reset,{},0,7},save_test,system_defaults);
         std::unique_ptr<Menu> load_menu(ui16_create_crt_menu(true,true));
         capture_info(*load_menu);
-        const auto source_line=std::string(ui16_osd_canvas().cells.data()+6*32,32);
-        const auto read_line=std::string(ui16_osd_canvas().cells.data()+7*32,32);
-        assert(source_line.find("LOADED FROM: SYSTEM")!=std::string::npos);
-        assert(read_line.find("SAVE READ: RESET")!=std::string::npos);
+        const auto source_line=std::string(ui16_osd_canvas().cells.data()+1*32,32);
+        const auto read_line=std::string(ui16_osd_canvas().cells.data()+2*32,32);
+        assert(source_line.find("SRC SYSTEM")!=std::string::npos);
+        assert(read_line.find("READ RESET")!=std::string::npos);
         assert(load_menu->on_adjust(0,1));save_ok=true;
         assert(!load_menu->on_choose(3));capture_info(*load_menu);
-        assert(std::string(ui16_osd_canvas().cells.data()+5*32,32).find("SAVE: SAVED")!=std::string::npos);
-        assert(std::string(ui16_osd_canvas().cells.data()+6*32,32)==source_line);
-        assert(std::string(ui16_osd_canvas().cells.data()+7*32,32)==read_line);
+        assert(std::string(ui16_osd_canvas().cells.data()+0*32,32).find("SAVE OK")!=std::string::npos);
+        assert(std::string(ui16_osd_canvas().cells.data()+1*32,32)==source_line);
+        assert(std::string(ui16_osd_canvas().cells.data()+2*32,32)==read_line);
         assert(!load_menu->on_choose(4)&&!load_menu->on_choose(3));capture_info(*load_menu);
-        assert(std::string(ui16_osd_canvas().cells.data()+6*32,32)==source_line);
-        assert(std::string(ui16_osd_canvas().cells.data()+7*32,32)==read_line);
-        for(auto state:{Ui16CrtReadState::NoId,Ui16CrtReadState::Missing,Ui16CrtReadState::User,
-                        Ui16CrtReadState::Reset,Ui16CrtReadState::Recovered,Ui16CrtReadState::Bad,
-                        Ui16CrtReadState::Io,Ui16CrtReadState::Future,Ui16CrtReadState::Conflict}){
+        assert(std::string(ui16_osd_canvas().cells.data()+1*32,32)==source_line);
+        assert(std::string(ui16_osd_canvas().cells.data()+2*32,32)==read_line);
+        const char *statuses[]={"NO ID","MISSING","USER","RESET","RECOV.","BAD REC","I/O ERR","NEW FMT","CLASH"};
+        for(unsigned index=0;index<sizeof(statuses)/sizeof(*statuses);++index){
+            const auto state=static_cast<Ui16CrtReadState>(index);
+            const auto expected_status=statuses[index];
             ui16_crt_new_session({},id,{state,{}},save_test,{});
             capture_info(*load_menu);
             const auto &canvas=ui16_osd_canvas().cells;
-            assert(std::string(canvas.data()+6*32,32).find("LOADED FROM: BUILT-IN")!=std::string::npos);
-            assert(std::string(canvas.data()+7*32,32).find(std::string("SAVE READ: ")+ui16_crt_read_name(state))!=std::string::npos);
-            assert(std::string(canvas.data()+6*32+21,11)==std::string(11,' '));
-            assert(std::string(canvas.data()+7*32+21,11)==std::string(11,' '));
-            const auto f=frame(*load_menu);assert(f.width==16&&f.height==10);
+            assert(std::string(canvas.data()+1*32,32).find("SRC BUILT-IN")!=std::string::npos);
+            assert(std::string(canvas.data()+2*32,32).find(std::string("READ ")+expected_status)!=std::string::npos);
+            assert(std::string(canvas.data()+1*32+12,20)==std::string(20,' '));
+            assert(std::string(canvas.data()+2*32+12,20)==std::string(20,' '));
+            const auto f=frame(*load_menu);assert(f.width==15&&f.height==10);
             assert(load_menu->on_info());const auto info_frame=frame(*load_menu);
-            assert(info_frame.width==24&&info_frame.height==17);assert(load_menu->on_info());
+            check_quadrant(info_frame);check_unclipped_text();
+            assert(info_frame.width==15&&info_frame.height==11);assert(load_menu->on_info());
         }
     }
     // Exercise the real input loop through all three pages. SAVE must still
@@ -538,7 +558,7 @@ int main(){
         if(system==2)ui16_crt_snes_session({},id,{},save_test,{});
         else ui16_crt_new_session({},id,{},save_test);
         menu_clear();push_menu(std::unique_ptr<Menu>(ui16_create_crt_menu(true,true)));
-        _overlay_on=1;at=0;pads.clear();
+        _overlay_on=1;at=0;pads.clear();boxes.clear();snapshots.clear();
         const auto press=[](std::uint16_t button){pads.push_back(button);pads.push_back(0);};
         press(0x80); // MAIN -> EFFECTS
         press(0x20);press(0x20);press(0x80); // MASK -> APERTURE GRILLE
@@ -560,6 +580,7 @@ int main(){
         press(0x200);
         const auto previously_saved=saves;
         ui16_osd_menu_input_loop(false,"CRT SETTINGS",true);
+        for(const auto &box:boxes)check_quadrant(box[0],box[1],box[2],box[3]);
         assert(!overlay_on()&&saves==previously_saved+1&&saved_value.flags()==0x4041&&saved_value.glow&&saved_value.composite);
         assert((config>>16)==0xc043 && saved_value.curvature && (config & Ui16CrtSettings::CurveBit));
         assert(saved_value.persistence && (config & Ui16CrtSettings::PersistenceBit));
@@ -572,17 +593,48 @@ int main(){
         assert(saw_signal);
         bool saw_curve=false;
         for(const auto &view:snapshots)
-            saw_curve |= visible(view,0,0,32,28).find("CURVATURE ON")!=std::string::npos;
+            saw_curve |= visible(view,0,0,32,28).find("CURVE ON")!=std::string::npos;
         assert(saw_curve);
         bool saw_convergence=false;
         for(const auto &view:snapshots)
-            saw_convergence |= visible(view,0,0,32,28).find("CONVERGENCE ON")!=std::string::npos;
+            saw_convergence |= visible(view,0,0,32,28).find("CONVERG. ON")!=std::string::npos;
         assert(saw_convergence);
         assert((saved_value.widths==std::array<std::uint8_t,4>{1,0,0,0}));
         menu_clear();
     }
+    // Check the lower scroll rows and the fixed Overscan columns in each corner.
+    auto extended=std::unique_ptr<Menu>(ui16_create_crt_menu(true,true));
+    assert(extended->on_adjust(0,1));
+    for(unsigned p=1;p<5;++p){
+        const auto position=static_cast<Ui16OsdPosition>(p);
+        const auto first=frame(*extended,position);
+        check_quadrant(first);check_unclipped_text();
+        assert(first.cells[(first.y+9)*32+first.x+14]=='v');
+        const auto last=frame(*extended,position,12);
+        check_quadrant(last);check_unclipped_text();
+        assert(last.cells[(last.y+2)*32+last.x+14]=='^');
+        assert(visible(last.cells,last.x,last.y,last.width,last.height).find(">AFTRGLW ON")!=std::string::npos);
+    }
+    assert(extended->on_adjust(0,1));
+    assert(extended->on_adjust(3,-1)); // BOTTOM 0 -> 255.
+    capture(*extended);check_unclipped_text();
+    const auto &crop=ui16_osd_canvas().cells;
+    for(int row=2;row<=5;++row)assert(crop[row*32+6]==':'&&crop[row*32+10]=='P'&&crop[row*32+11]=='X');
+    assert(std::string(crop.data()+2*32,12)=="TOP   :  1PX");
+    assert(std::string(crop.data()+3*32,12)=="BOTTOM:255PX");
+    // Verify all four actual POS transitions and wrap on the settings window.
+    menu_clear();push_menu(std::unique_ptr<Menu>(ui16_create_crt_menu(true,true)));
+    _overlay_on=1;at=0;boxes.clear();snapshots.clear();
+    pads.clear();
+    for(unsigned i=0;i<menu_current()->get_options().size();++i)pads.insert(pads.end(),{0x20,0});
+    pads.insert(pads.end(),{0x80,0,0x80,0,0x80,0,0x80,0,0x200});
+    ui16_osd_menu_input_loop(false,"CRT SETTINGS",true);
+    assert(boxes.size()==5&&boxes.front()==boxes.back());
+    for(const auto &box:boxes)check_quadrant(box[0],box[1],box[2],box[3]);
+    for(unsigned i=0;i<4;++i)for(unsigned j=i+1;j<4;++j)assert(boxes[i]!=boxes[j]);
+    menu_clear();
     std::puts("Extended OSD2 controller input PASS: Glow, curvature and convergence, confirm, SAVE and close on both systems");
     std::puts("Load info PASS: source/read-state snapshots survive USER/Reset SAVE, all states fit existing frame, NES/SNES");
     std::puts("CRT host PASS: hotkeys, preserved config, frame ACK/retry, stale ACK rejection, CSV/default/explicit OFF seeds, invalid seed fallback, explicit SAVE/stay-open/retry and X/Y discard of live preview");
-    std::puts("Compact OSD2 PASS: NES/SNES all 32 settings and 5 positions, hidden diagnostics, SAVE status, START hold/combinations, preserved selection, visible window and exact shrink-back");
+    std::puts("Compact OSD2 PASS: NES/SNES settings, corner bounds, START info, SAVE status and selection retention");
 }

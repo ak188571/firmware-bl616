@@ -69,16 +69,16 @@ int main(int argc,char **argv){
         const Ui16CrtSettings expected=profile==0?Ui16CrtSettings{true,2,1}:profile==1?Ui16CrtSettings{true,1,3}:Ui16CrtSettings{};
         assert(config==expected.merge(0));
         std::unique_ptr<Menu> menu(ui16_create_crt_menu(true,true));assert(menu->on_info());
-        check(*menu,6,profile==0?"LOADED FROM: SYSTEM":profile==1?"LOADED FROM: GLOBAL":"LOADED FROM: BUILT-IN");
-        check(*menu,7,profile==0?"SAVE READ: RECOVERED":profile==1?"SAVE READ: BAD SAVE":"SAVE READ: NEW SCHEMA");
-        check(*menu,10,profile<2?"DEFAULTS: OK":"DEFAULTS: BAD FILE");
-        check(*menu,5,profile==0?"SAVE: SAVED":"SAVE: RECOMMENDED");
+        check(*menu,1,profile==0?"SRC SYSTEM":profile==1?"SRC GLOBAL":"SRC BUILT-IN");
+        check(*menu,2,profile==0?"READ RECOV.":profile==1?"READ BAD REC":"READ NEW FMT");
+        check(*menu,5,profile<2?"DEF OK":"DEF BAD FILE");
+        check(*menu,0,profile==0?"SAVE OK":"SAVE PRESET");
         if(profile==2){
             assert(menu->on_adjust(0,1));assert(!menu->on_choose(3));
-            check(*menu,3,"SAVE FAILED");check(*menu,5,"SAVE: FAILED");
-            check(*menu,6,"LOADED FROM: BUILT-IN");check(*menu,7,"SAVE READ: NEW SCHEMA");
+            check(*menu,0,"SAVE FAILED");
+            check(*menu,1,"SRC BUILT-IN");check(*menu,2,"READ NEW FMT");
             assert(menu->on_close()&&config==0);
-            assert(!menu->on_choose(4)&&!menu->on_choose(3));check(*menu,5,"SAVE: FAILED");
+            assert(!menu->on_choose(4)&&!menu->on_choose(3));check(*menu,0,"SAVE FAILED");
             assert(menu->on_close()&&config==0);
         }
         assert(!active&&mutation_attempts==0);

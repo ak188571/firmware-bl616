@@ -93,7 +93,7 @@ int main(int argc,char **argv){
             change(*menu,row,-1);flags-=1u<<bit;expect(flags);
         }
     }
-    line(*menu,2,"APERTURE GRILLE");change(*menu,2);flags+=1u<<6;line(*menu,2,"SHADOW MASK");
+    line(*menu,2,"MASK GRILLE");change(*menu,2);flags+=1u<<6;line(*menu,2,"MASK SHADOW");
     choose(*menu,0);line(*menu,0,"OVERSCAN");change(*menu,1);flags|=1u<<14;expect(flags);
     std::array<std::uint8_t,4> widths{};
     for(int i=0;i<4;++i){
@@ -106,9 +106,9 @@ int main(int argc,char **argv){
     assert(menu->get_options().back()==8);
     menu->on_info(0x0008);
     ui16_crt_accept_status(config ^ Ui16CrtSettings::GlowBit);
-    menu->on_tick(1);line(*menu,12,"WAITING");
+    menu->on_tick(1);line(*menu,3,"WAITING");
     ui16_crt_accept_status(config);
-    menu->on_tick(2);line(*menu,12,"FRAME ACK");
+    menu->on_tick(2);line(*menu,3,"FRAME ACK");
     menu->on_info(0x0008);
     change(*menu,8,-1);line(*menu,8,"GLOW OFF");expect(flags,widths);
     change(*menu,8);expect(flags,widths,true);
@@ -118,8 +118,8 @@ int main(int argc,char **argv){
     change(*menu,5,-1);choose(*menu,0);choose(*menu,4);
     const std::array<std::uint8_t,4> bwidths{0,0,0,255};
     expect(0x201,bwidths); // Width saved even while Overscan is OFF.
-    menu=launch(a);expect(flags,widths,true);choose(*menu,0);line(*menu,2,"SHADOW MASK");
-    choose(*menu,0);line(*menu,2,"TOP 255 PX");change(*menu,2);assert(menu->on_close());expect(flags,widths,true);
+    menu=launch(a);expect(flags,widths,true);choose(*menu,0);line(*menu,2,"MASK SHADOW");
+    choose(*menu,0);line(*menu,2,"TOP   :255PX");change(*menu,2);assert(menu->on_close());expect(flags,widths,true);
     menu=launch(b);expect(0x201,bwidths);
     choose(*menu,5);expect(0);assert(menu->on_close());expect(0x201,bwidths);
     choose(*menu,5);choose(*menu,4);menu=launch(b);expect(0);
@@ -134,10 +134,10 @@ int main(int argc,char **argv){
     // The signal selector is the last selectable option on MAIN. Older records
     // supply the RGB bank verbatim. Changing either bank must preserve the other.
     line(*menu,6,"SIGNAL RGB");change(*menu,6);expect(0x8013);
-    line(*menu,6,"SIGNAL COMPOSITE");
+    line(*menu,6,"SIGNAL COMP.");
     menu->on_info(0x0008);
-    ui16_crt_accept_status(config ^ (1u<<31));menu->on_tick(3);line(*menu,10,"WAITING");
-    ui16_crt_accept_status(config);menu->on_tick(4);line(*menu,10,"FRAME ACK");
+    ui16_crt_accept_status(config ^ (1u<<31));menu->on_tick(3);line(*menu,3,"WAITING");
+    ui16_crt_accept_status(config);menu->on_tick(4);line(*menu,3,"FRAME ACK");
     menu->on_info(0x0008);assert(menu->on_close());expect(19);
     menu=launch(b);change(*menu,1);expect(1);
     choose(*menu,6);line(*menu,2,"BLUR WEAK");expect(0x8003);
@@ -146,36 +146,36 @@ int main(int argc,char **argv){
     change(*menu,8);expect(5,{},true);       // Glow is shared.
     choose(*menu,0);choose(*menu,0);choose(*menu,4);line(*menu,4,"SAVE OK");
     menu=launch(a);expect(19);line(*menu,6,"SIGNAL RGB");
-    menu=launch(b);expect(5,{},true);line(*menu,6,"SIGNAL COMPOSITE");
+    menu=launch(b);expect(5,{},true);line(*menu,6,"SIGNAL COMP.");
     change(*menu,6,-1);expect(1,{},true);line(*menu,2,"BLUR OFF");
     change(*menu,2,-1);expect(7,{},true); // RGB STRONG.
     choose(*menu,0);change(*menu,7);expect(0x8007,{},true);
     choose(*menu,0);choose(*menu,0);choose(*menu,4);
     menu=launch(b);expect(0x8007,{},true);line(*menu,6,"SIGNAL RGB");
     choose(*menu,6);expect(5,{},true);
-    choose(*menu,0);line(*menu,7,"CHROMA BLEED OFF");
+    choose(*menu,0);line(*menu,7,"BLEED OFF");
     assert(menu->on_close());expect(0x8007,{},true);
     menu=launch(b);choose(*menu,5);expect(0);choose(*menu,4);
     menu=launch(b);line(*menu,6,"SIGNAL RGB");expect(0);choose(*menu,6);expect(0x8002);
     ui16_crt_preview_session();
     menu.reset(ui16_create_crt_menu(true,true));
     assert(menu->get_options().back()==6 && menu->get_options().size()==5);
-    choose(*menu,4);line(*menu,6,"SIGNAL COMPOSITE");
+    choose(*menu,4);line(*menu,6,"SIGNAL COMP.");
     ui16_crt_set_width_sender(ui16_send_crt_widths,true,true);
-    menu=launch(a);choose(*menu,0);line(*menu,9,"CURVATURE OFF");expect(19);
-    change(*menu,9);line(*menu,9,"CURVATURE ON");
+    menu=launch(a);choose(*menu,0);line(*menu,9,"CURVE OFF");expect(19);
+    change(*menu,9);line(*menu,9,"CURVE ON");
     assert(config==(19u<<16 | Ui16CrtSettings::CurveBit | 0x123u));
     assert(menu->on_close());expect(19);
     menu=launch(b);choose(*menu,1);choose(*menu,6);choose(*menu,0);
     change(*menu,8);change(*menu,9);
     const auto curved=config;assert((curved & 0xc000u)==0xc000u);
     menu->on_info(0x0008);ui16_crt_accept_status(curved^Ui16CrtSettings::CurveBit);
-    menu->on_tick(10);line(*menu,13,"WAITING");
-    ui16_crt_accept_status(curved);menu->on_tick(11);line(*menu,13,"FRAME ACK");
+    menu->on_tick(10);line(*menu,3,"WAITING");
+    ui16_crt_accept_status(curved);menu->on_tick(11);line(*menu,3,"FRAME ACK");
     menu->on_info(0x0008);choose(*menu,0);choose(*menu,0);
     choose(*menu,4);line(*menu,4,"SAVE OK");
     menu=launch(a);expect(19);menu=launch(b);assert(config==curved);
-    line(*menu,6,"SIGNAL COMPOSITE");choose(*menu,0);line(*menu,9,"CURVATURE ON");
+    line(*menu,6,"SIGNAL COMP.");choose(*menu,0);line(*menu,9,"CURVE ON");
     change(*menu,9);assert(menu->on_close() && config==curved);
     ui16_crt_set_width_sender(ui16_send_crt_widths,true,false);
     config&=~Ui16CrtSettings::CurveBit;menu=launch(b);
@@ -185,24 +185,24 @@ int main(int argc,char **argv){
     assert(config & Ui16CrtSettings::CurveBit); // Old core owns this bit.
     ui16_crt_set_width_sender(ui16_send_crt_widths,true,true);
     menu=launch(b);choose(*menu,5);choose(*menu,4);
-    menu=launch(b);expect(0);choose(*menu,0);line(*menu,9,"CURVATURE OFF");
+    menu=launch(b);expect(0);choose(*menu,0);line(*menu,9,"CURVE OFF");
     std::printf("PASS system %u: curvature capability, frame ACK, ROM-specific schema 6, cancel/reset and old-core bit ownership\n",system);
     ui16_crt_set_width_sender(ui16_send_crt_widths,true,true,true);
-    menu=launch(b);choose(*menu,0);line(*menu,10,"CONVERGENCE OFF");
+    menu=launch(b);choose(*menu,0);line(*menu,10,"CONVERG. OFF");
     change(*menu,10);assert(config & Ui16CrtSettings::ConvergenceBit);
     assert(menu->on_close());expect(0);
     menu=launch(b);change(*menu,1);choose(*menu,0);change(*menu,10);
     const auto converged=config;
     menu->on_info(0x0008);ui16_crt_accept_status(converged^Ui16CrtSettings::ConvergenceBit);
-    menu->on_tick(20);line(*menu,14,"WAITING");
-    ui16_crt_accept_status(converged);menu->on_tick(21);line(*menu,14,"FRAME ACK");
+    menu->on_tick(20);line(*menu,3,"WAITING");
+    ui16_crt_accept_status(converged);menu->on_tick(21);line(*menu,3,"FRAME ACK");
     menu->on_info(0x0008);choose(*menu,0);choose(*menu,0);choose(*menu,4);line(*menu,4,"SAVE OK");
     menu=launch(a);expect(19);menu=launch(b);assert(config==converged);
-    choose(*menu,0);line(*menu,9,"CURVATURE OFF");line(*menu,10,"CONVERGENCE ON");
+    choose(*menu,0);line(*menu,9,"CURVE OFF");line(*menu,10,"CONVERG. ON");
     change(*menu,9);choose(*menu,0);choose(*menu,0);choose(*menu,4);
     menu=launch(b);assert(config==(converged|Ui16CrtSettings::CurveBit));
     choose(*menu,0);change(*menu,10);choose(*menu,0);choose(*menu,0);choose(*menu,4);
-    menu=launch(b);choose(*menu,0);line(*menu,9,"CURVATURE ON");line(*menu,10,"CONVERGENCE OFF");
+    menu=launch(b);choose(*menu,0);line(*menu,9,"CURVE ON");line(*menu,10,"CONVERG. OFF");
     ui16_crt_set_width_sender(ui16_send_crt_widths,true,true);
     config|=Ui16CrtSettings::ConvergenceBit;menu=launch(a);choose(*menu,0);
     assert((config & Ui16CrtSettings::ConvergenceBit) && menu->get_options().back()==9 && !menu->on_adjust(10,1));
@@ -211,13 +211,13 @@ int main(int argc,char **argv){
     std::printf("PASS system %u: convergence row, frame ACK, ROM-specific save with curvature OFF/ON, legacy restore, cancel/reset and previous-core gating\n",system);
     ui16_crt_set_width_sender(ui16_send_crt_widths,true,true,true,true);
     menu=launch(b);choose(*menu,1);line(*menu,6,"SIGNAL RGB");
-    change(*menu,6);line(*menu,6,"SIGNAL COMPOSITE");assert(!(config & Ui16CrtSettings::NtscBit));
+    change(*menu,6);line(*menu,6,"SIGNAL COMP.");assert(!(config & Ui16CrtSettings::NtscBit));
     change(*menu,6);line(*menu,6,"SIGNAL NTSC");assert(config & Ui16CrtSettings::NtscBit);
     menu->on_info(0x0008);
-    ui16_crt_accept_status(config ^ Ui16CrtSettings::NtscBit);menu->on_tick(30);line(*menu,10,"WAITING");
-    ui16_crt_accept_status(config);menu->on_tick(31);line(*menu,10,"FRAME ACK");
+    ui16_crt_accept_status(config ^ Ui16CrtSettings::NtscBit);menu->on_tick(30);line(*menu,3,"WAITING");
+    ui16_crt_accept_status(config);menu->on_tick(31);line(*menu,3,"FRAME ACK");
     menu->on_info(0x0008);
-    change(*menu,6,-1);line(*menu,6,"SIGNAL COMPOSITE");
+    change(*menu,6,-1);line(*menu,6,"SIGNAL COMP.");
     change(*menu,6,-1);line(*menu,6,"SIGNAL RGB");
     change(*menu,6,-1);line(*menu,6,"SIGNAL NTSC");
     assert(menu->on_close());expect(0);
@@ -229,7 +229,7 @@ int main(int argc,char **argv){
     choose(*menu,0);choose(*menu,0);choose(*menu,4);
     menu=launch(b);assert(config==(saved_ntsc|Ui16CrtSettings::CurveBit|Ui16CrtSettings::ConvergenceBit));
     ui16_crt_set_width_sender(ui16_send_crt_widths,true,true,true);
-    config&=~Ui16CrtSettings::NtscBit;menu=launch(b);line(*menu,6,"SIGNAL COMPOSITE");
+    config&=~Ui16CrtSettings::NtscBit;menu=launch(b);line(*menu,6,"SIGNAL COMP.");
     assert(!(config & Ui16CrtSettings::NtscBit));change(*menu,6);line(*menu,6,"SIGNAL RGB");
     config|=Ui16CrtSettings::NtscBit;menu=launch(a);assert(config & Ui16CrtSettings::NtscBit);
     ui16_crt_set_width_sender(ui16_send_crt_widths,true,true,true,true);
@@ -240,8 +240,8 @@ int main(int argc,char **argv){
     line(*menu,11,"BLOOM OFF");change(*menu,11);line(*menu,11,"BLOOM ON");
     assert(config & Ui16CrtSettings::BloomBit);
     menu->on_info(0x0008);
-    ui16_crt_accept_status(config ^ Ui16CrtSettings::BloomBit);menu->on_tick(40);line(*menu,15,"WAITING");
-    ui16_crt_accept_status(config);menu->on_tick(41);line(*menu,15,"FRAME ACK");
+    ui16_crt_accept_status(config ^ Ui16CrtSettings::BloomBit);menu->on_tick(40);line(*menu,3,"WAITING");
+    ui16_crt_accept_status(config);menu->on_tick(41);line(*menu,3,"FRAME ACK");
     menu->on_info(0x0008);
     assert(menu->on_close());expect(0); // unsaved preview was discarded
     menu=launch(b);choose(*menu,1);choose(*menu,0);change(*menu,11);
@@ -258,18 +258,18 @@ int main(int argc,char **argv){
     std::printf("PASS system %u: Bloom, Glow independence, frame ACK, ROM save/restore, cancel, reset and old-core gating\n",system);
     ui16_crt_set_width_sender(ui16_send_crt_widths,true,true,true,true,true,true);
     menu=launch(b);choose(*menu,1);choose(*menu,0);
-    line(*menu,12,"AFTERGLOW OFF");change(*menu,12);line(*menu,12,"AFTERGLOW ON");
+    line(*menu,12,"AFTRGLW OFF");change(*menu,12);line(*menu,12,"AFTRGLW ON");
     assert(config & Ui16CrtSettings::PersistenceBit);
     menu->on_info(0x0008);
-    ui16_crt_accept_status(config ^ Ui16CrtSettings::PersistenceBit);menu->on_tick(40);line(*menu,16,"WAITING");
-    ui16_crt_accept_status(config);menu->on_tick(41);line(*menu,16,"FRAME ACK");
+    ui16_crt_accept_status(config ^ Ui16CrtSettings::PersistenceBit);menu->on_tick(40);line(*menu,3,"WAITING");
+    ui16_crt_accept_status(config);menu->on_tick(41);line(*menu,3,"FRAME ACK");
     menu->on_info(0x0008);
     assert(menu->on_close());expect(0); // unsaved preview was discarded
     menu=launch(b);choose(*menu,1);choose(*menu,0);change(*menu,12);
     change(*menu,11);choose(*menu,0);choose(*menu,0);choose(*menu,4);line(*menu,4,"SAVE OK");
     const auto saved_persistence=config;
     menu=launch(a);expect(19);menu=launch(b);assert(config==saved_persistence);
-    choose(*menu,0);line(*menu,11,"BLOOM ON");line(*menu,12,"AFTERGLOW ON");
+    choose(*menu,0);line(*menu,11,"BLOOM ON");line(*menu,12,"AFTRGLW ON");
     ui16_crt_set_width_sender(ui16_send_crt_widths,true,true,true,true,true);
     config&=~Ui16CrtSettings::PersistenceBit;menu=launch(b);choose(*menu,0);
     assert(menu->get_options().back()==11 && !menu->on_adjust(12,1) && !(config & Ui16CrtSettings::PersistenceBit));

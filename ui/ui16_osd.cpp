@@ -34,23 +34,30 @@ const char *ui16_osd_position_name(Ui16OsdPosition p){
 Ui16OsdFrame ui16_osd_layout(const Ui16OsdCanvas &c,const std::vector<int> &options,
     int selected,int &top,int &width_floor,Ui16OsdPosition position,bool movable,const char *title,const Ui16OsdStyle *style)
 {
+    const bool interactive=!(style&&style->informational);
+    movable=movable&&interactive;
     int first=Ui16OsdCanvas::Rows-1,last=0,width=0;
     for(int y=0;y<Ui16OsdCanvas::Rows;++y)for(int x=0;x<32;++x)
         if(c.cells[y*32+x]!=' '&&c.cells[y*32+x]!=0){first=std::min(first,y);last=std::max(last,y);width=std::max(width,x+1);}
-    for(int row:options)if(row>=0&&row<Ui16OsdCanvas::Rows){first=std::min(first,row);last=std::max(last,row);}
+    if(interactive)for(int row:options)if(row>=0&&row<Ui16OsdCanvas::Rows){first=std::min(first,row);last=std::max(last,row);}
     if(first>last)first=last=0;
-    const int lines=std::min(21,last-first+1);
+    const int lines=std::min(style?style->maximum_lines:21,last-first+1);
     top=std::max(first,std::min(top,last-lines+1));
-    if(selected>=0&&selected<static_cast<int>(options.size())){
+    if(interactive&&selected>=0&&selected<static_cast<int>(options.size())){
         const int row=options[selected];
         if(row>=first&&row<=last){if(row<top)top=row;else if(row>=top+lines)top=row-lines+1;}
     }
     const int minimum=style?std::max(1,std::min(style->minimum_width,27)):16;
-    width_floor=std::min(27,std::max({width_floor,width,minimum}));
+    width_floor=std::min(style?style->maximum_width:27,std::max({width_floor,width,minimum}));
     Ui16OsdFrame f;f.cells.fill(' ');f.width=width_floor+3;f.height=lines+(movable?5:4);
-    const auto p=position;
+    const auto p=style&&style->corner_only&&position==Ui16OsdPosition::Center?
+        Ui16OsdPosition::TopRight:position;
     f.x=(p==Ui16OsdPosition::Center)?(32-f.width)/2:
         (p==Ui16OsdPosition::TopRight||p==Ui16OsdPosition::BottomRight)?31-f.width:1;
+    // Leave a cell between a corner window and the horizontal midpoint,
+    // including the hardware's two-pixel opacity delay.
+    if(style&&style->corner_only)
+        f.x=(p==Ui16OsdPosition::TopRight||p==Ui16OsdPosition::BottomRight)?17:15-f.width;
     f.y=(p==Ui16OsdPosition::Center)?(28-f.height)/2:
         (p==Ui16OsdPosition::BottomLeft||p==Ui16OsdPosition::BottomRight)?27-f.height:1;
     auto put=[&](int x,int y,char v){if(x>=0&&y>=0&&x<static_cast<int>(f.width)&&y<static_cast<int>(f.height))f.cells[(f.y+y)*32+f.x+x]=v;};
@@ -61,11 +68,13 @@ Ui16OsdFrame ui16_osd_layout(const Ui16OsdCanvas &c,const std::vector<int> &opti
     text(2,1,style&&style->title?style->title:title);
     for(int i=0;i<lines;++i){
         for(int x=0;x<width_floor;++x)put(x+2,i+2,c.cells[(top+i)*32+x]);
-        if(selected>=0&&selected<static_cast<int>(options.size())&&options[selected]==top+i)put(1,i+2,'>');
+        if(interactive&&selected>=0&&selected<static_cast<int>(options.size())&&options[selected]==top+i)put(1,i+2,'>');
     }
+    if(style&&style->corner_only&&top>first)put(f.width-1,2,'^');
+    if(style&&style->corner_only&&top+lines<=last)put(f.width-1,lines+1,'v');
     if(movable){
         static const char *const short_names[]={"C","TL","TR","BL","BR"};
-        text(2,lines+2,std::string("POS ")+(style&&style->short_position?short_names[static_cast<unsigned>(position)]:ui16_osd_position_name(position)));
+        text(2,lines+2,std::string("POS ")+(style&&style->short_position?short_names[static_cast<unsigned>(p)]:ui16_osd_position_name(p)));
         if(selected==static_cast<int>(options.size()))put(1,lines+2,'>');
     }
     text(2,lines+(movable?3:2),style&&style->footer?style->footer:"A/B OK X/Y BACK");
