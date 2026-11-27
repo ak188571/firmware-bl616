@@ -321,6 +321,11 @@ int main(int argc,char **argv){
     menu=launch(a);choose(*menu,0);line(*menu,15,"FOCUS OFF");line(*menu,10,"CONVERG. OFF");
     menu=launch(b);choose(*menu,0);line(*menu,15,"FOCUS ON");line(*menu,10,"CONVERG. POS");
     std::printf("PASS system %u: edge focus and positional convergence per ROM\n",system);
+    menu=launch(b);choose(*menu,0);change(*menu,12,-1);line(*menu,12,"AFTRGLW RGB");
+    choose(*menu,0);choose(*menu,0);choose(*menu,4);
+    menu=launch(a);choose(*menu,0);line(*menu,12,"AFTRGLW OFF");
+    menu=launch(b);choose(*menu,0);line(*menu,12,"AFTRGLW RGB");line(*menu,15,"FOCUS ON");
+    std::printf("PASS system %u: per-primary afterglow stored independently\n",system);
     std::printf("PASS system %u: independent RGB/Composite controls, shared Glow, legacy RGB, per-ROM v5 save/reload, cancel, reset and preview navigation\n",system);
     std::printf("PASS system %u: Glow toggle and frame ACK, old-core gating, schema 1/3/4 ROM A/B reload, cancel/reset\n",system);
 }
