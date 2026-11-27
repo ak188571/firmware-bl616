@@ -1,2 +1,2 @@
 system	crt_v2
-*	crt=off signal=rgb blur=weak scan=weak beam=on beamspot=on mask=grille pitch=1px glow=on overscan=on top=2 bottom=2 left=2 right=2
+*	crt=off signal=composite blur=weak composite_blur=weak composite_bleed=off scan=weak beam=on beamspot=on mask=shadow pitch=1px glow=on overscan=on top=2 bottom=2 left=2 right=2

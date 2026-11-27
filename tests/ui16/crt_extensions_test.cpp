@@ -342,7 +342,9 @@ int main(int argc,char **argv){
     std::printf("PASS system %u: Glow toggle and frame ACK, old-core gating, schema 1/3/4 ROM A/B reload, cancel/reset\n",system);
     fs::copy_file("example.tsv","crt/defaults.tsv");
     menu=launch(b);
-    const unsigned flags_global=(1u<<1)|(1u<<3)|(1u<<5)|(1u<<6)|(1u<<14);
+    line(*menu,6,"SIGNAL COMP.");
+    line(*menu,2,"BLUR WEAK");
+    const unsigned flags_global=(1u<<1)|(1u<<3)|(1u<<5)|(2u<<6)|(1u<<14);
     const auto off=(flags_global<<16)|Ui16CrtSettings::SpotBit|Ui16CrtSettings::GlowBit;
     const auto owned=0xffff0000u|0xfff8u;
     const std::array<std::uint8_t,4> crop={2,2,2,2};
@@ -354,8 +356,10 @@ int main(int argc,char **argv){
     choose(*menu,5);choose(*menu,4);
     Ui16CrtRecommendation title;assert(ui16_parse_crt("1:2:3",title));
     menu=launch(b,title);
-    const unsigned csv_bits=Ui16CrtSettings{true,2,3}.flags()<<16;
+    // CSV sets master and scan; its blur is RGB-only. Composite keeps WEAK.
+    const unsigned csv_bits=Ui16CrtSettings{true,1,3}.flags()<<16;
     assert((config & owned)==((off & ~(0x1fu<<16))|csv_bits) && transmitted==crop);
+    change(*menu,6,-1);line(*menu,6,"SIGNAL RGB");line(*menu,2,"BLUR STD");
     fs::remove("crt/defaults.tsv");
     std::printf("PASS system %u: GLOBAL preset, master-only toggle, four widths, ROM override, RESET and title CSV\n",system);
 }
