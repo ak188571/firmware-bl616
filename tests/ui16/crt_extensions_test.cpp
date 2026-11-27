@@ -296,6 +296,19 @@ int main(int argc,char **argv){
     ui16_crt_set_width_sender(ui16_send_crt_widths,true,true,true,true,true,true,true);
     menu=launch(b);choose(*menu,5);choose(*menu,4);menu=launch(b);expect(0);
     std::printf("PASS system %u: beam spot, legacy OFF, frame ACK, independent ROM saves, reset/cancel and old core\n",system);
+    ui16_crt_set_width_sender(ui16_send_crt_widths,true,true,true,true,true,true,true,Ui16CrtSettings::DisplayRevision);
+    menu=launch(a);choose(*menu,0);line(*menu,14,"PITCH 1PX");
+    menu=launch(b);choose(*menu,1);choose(*menu,0);
+    change(*menu,2,-1);line(*menu,2,"MASK SLOT");
+    change(*menu,14);line(*menu,14,"PITCH 2PX");
+    choose(*menu,0);choose(*menu,0);choose(*menu,4);line(*menu,4,"SAVE OK");
+    const auto saved_display=config;
+    menu=launch(a);choose(*menu,0);line(*menu,2,"MASK OFF");line(*menu,14,"PITCH 1PX");
+    menu=launch(b);assert(config==saved_display);choose(*menu,0);line(*menu,2,"MASK SLOT");line(*menu,14,"PITCH 2PX");
+    change(*menu,14);assert(menu->on_close());assert(config==saved_display);
+    ui16_crt_set_width_sender(ui16_send_crt_widths,true,true,true,true,true,true,true);
+    menu=launch(b);choose(*menu,0);line(*menu,2,"MASK OFF");assert(menu->get_options().back()==13);
+    std::printf("PASS system %u: slot, pitch, per-ROM restore, cancel and capability gating\n",system);
     std::printf("PASS system %u: independent RGB/Composite controls, shared Glow, legacy RGB, per-ROM v5 save/reload, cancel, reset and preview navigation\n",system);
     std::printf("PASS system %u: Glow toggle and frame ACK, old-core gating, schema 1/3/4 ROM A/B reload, cancel/reset\n",system);
 }

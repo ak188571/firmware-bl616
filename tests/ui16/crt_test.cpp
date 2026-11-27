@@ -604,6 +604,7 @@ int main(){
         assert((saved_value.widths==std::array<std::uint8_t,4>{1,0,0,0}));
         menu_clear();
     }
+    ui16_crt_set_width_sender([](const std::array<std::uint8_t,4>&){},true,true,true,true,true,true,true,Ui16CrtSettings::DisplayRevision);
     // Check the lower scroll rows and the fixed Overscan columns in each corner.
     auto extended=std::unique_ptr<Menu>(ui16_create_crt_menu(true,true));
     assert(extended->on_adjust(0,1));
@@ -612,6 +613,9 @@ int main(){
         const auto first=frame(*extended,position);
         check_quadrant(first);check_unclipped_text();
         assert(first.cells[(first.y+9)*32+first.x+14]=='v');
+        const auto bottom=frame(*extended,position,extended->get_options().back());
+        check_quadrant(bottom);check_unclipped_text();
+        assert(visible(bottom.cells,bottom.x,bottom.y,bottom.width,bottom.height).find(">PITCH 1PX")!=std::string::npos);
         const auto last=frame(*extended,position,13);
         check_quadrant(last);check_unclipped_text();
         assert(last.cells[(last.y+2)*32+last.x+14]=='^');

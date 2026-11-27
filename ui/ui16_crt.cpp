@@ -23,12 +23,13 @@ volatile std::uint32_t applied_status=0;
 volatile bool status_seen=false;
 std::uint32_t last_send_ms=0;
 Ui16CrtWidthsFn send_widths=nullptr;
+unsigned display_revision=0;
 bool glow_supported=false,curve_supported=false,convergence_supported=false,ntsc_supported=false,bloom_supported=false,persistence_supported=false,spot_supported=false;
 void send_settings() {
     last_send_ms=static_cast<std::uint32_t>(bflb_mtimer_get_time_ms());
     taskENTER_CRITICAL();status_seen=false;taskEXIT_CRITICAL();
     if(send_widths)send_widths(settings.widths);
-    set_core_config(settings.merge(get_core_config(),send_widths!=nullptr,glow_supported,curve_supported,convergence_supported,ntsc_supported,bloom_supported,persistence_supported,spot_supported));
+    set_core_config(settings.merge(get_core_config(),send_widths!=nullptr,glow_supported,curve_supported,convergence_supported,ntsc_supported,bloom_supported,persistence_supported,spot_supported,display_revision));
 }
 const char *strength(unsigned n) {
     static const char *const names[]={"OFF","WEAK","STD","STRONG"};
@@ -100,11 +101,11 @@ struct CrtMenu:Menu {
             overlay_cursor(0,y++);overlay_printf("%s",reset_available()?"RESET":"RESET N/A");
             if(extended){overlay_cursor(0,y++);overlay_printf("SIGNAL %s",settings.ntsc && ntsc_supported?"NTSC":settings.composite?"COMP.":"RGB");}
         }else if(page==Effects){
-            static const char *const masks[]={"OFF","GRILLE","SHADOW"};
+            static const char *const masks[]={"OFF","GRILLE","SHADOW","SLOT"};
             static const char *const gamma[]={"OFF","0.80","1.25"};
             static const char *const temperatures[]={"OFF","WARM","COOL"};
             overlay_cursor(0,y++);overlay_printf("BEAM %s",settings.beam?"ON":"OFF");
-            overlay_cursor(0,y++);overlay_printf("MASK %s",masks[settings.mask]);
+            overlay_cursor(0,y++);overlay_printf("MASK %s",masks[settings.mask==3 && !display_revision ? 0 : settings.mask]);
             overlay_cursor(0,y++);overlay_printf("GAMMA %s",gamma[settings.gamma]);
             overlay_cursor(0,y++);overlay_printf("WHITE %s",temperatures[settings.temperature]);
             overlay_cursor(0,y++);overlay_printf("VIGNETTE %s",settings.vignette?"ON":"OFF");
@@ -116,6 +117,7 @@ struct CrtMenu:Menu {
             if(bloom_supported){overlay_cursor(0,y++);overlay_printf("BLOOM %s",settings.bloom?"ON":"OFF");}
             if(persistence_supported){overlay_cursor(0,y++);overlay_printf("AFTRGLW %s",settings.persistence?"ON":"OFF");}
             if(spot_supported){overlay_cursor(0,y++);overlay_printf("BEAMSPOT %s",settings.spot?"ON":"OFF");}
+            if(display_revision>=1){overlay_cursor(0,y++);overlay_printf("PITCH %s",(settings.display_options&Ui16CrtSettings::WidePitch)?"2PX":"1PX");}
         }else{
             static const char *const edges[]={"TOP","BOTTOM","LEFT","RIGHT"};
             overlay_cursor(0,y++);overlay_printf("OVERSCAN %s",settings.overscan?"ON":"OFF");
@@ -133,6 +135,7 @@ struct CrtMenu:Menu {
             if(bloom_supported)rows.push_back(11);
             if(persistence_supported)rows.push_back(12);
             if(spot_supported)rows.push_back(13);
+            if(display_revision>=1)rows.push_back(14);
             return rows;
         }
         if(page==Crop)return {0,1,2,3,4,5};
@@ -153,7 +156,7 @@ struct CrtMenu:Menu {
         if(page==Effects){
             switch(row){
             case 0: settings.beam=!settings.beam;break;
-            case 1: settings.mask=(settings.mask+step)%3;break;
+            case 1: {const unsigned count=display_revision ? 4 : 3;settings.mask=(settings.mask+(delta>0?1:count-1))%count;break;}
             case 2: settings.gamma=(settings.gamma+step)%3;break;
             case 3: settings.temperature=(settings.temperature+step)%3;break;
             case 4: settings.vignette=!settings.vignette;break;
@@ -163,6 +166,7 @@ struct CrtMenu:Menu {
                     break;
             case 7: if(!glow_supported)return false;settings.glow=!settings.glow;break;
             case 8: if(!curve_supported)return false;settings.curvature=!settings.curvature;break;
+            case 13: if(!display_revision)return false;settings.display_options^=Ui16CrtSettings::WidePitch;break;
             case 12: if(!spot_supported)return false;settings.spot=!settings.spot;break;
             case 11: if(!persistence_supported)return false;settings.persistence=!settings.persistence;break;
             case 10: if(!bloom_supported)return false;settings.bloom=!settings.bloom;break;
@@ -221,7 +225,7 @@ struct CrtMenu:Menu {
     bool on_tick(std::uint32_t now)override {
         bool seen;std::uint32_t value;
         taskENTER_CRITICAL();seen=status_seen;value=applied_status;taskEXIT_CRITICAL();
-        const bool next=seen && value==settings.merge(value,extended,glow_supported,curve_supported,convergence_supported,ntsc_supported,bloom_supported,persistence_supported,spot_supported);
+        const bool next=seen && value==settings.merge(value,extended,glow_supported,curve_supported,convergence_supported,ntsc_supported,bloom_supported,persistence_supported,spot_supported,display_revision);
         const bool changed=next!=matched;matched=next;
         // Recover a lost setting packet instead of waiting indefinitely for a
         // value that was never received. Requests are idempotent and coalesce.
@@ -233,13 +237,14 @@ struct CrtMenu:Menu {
     }
 };
 }
-void ui16_crt_set_width_sender(Ui16CrtWidthsFn send,bool supports_glow,bool supports_curve,bool supports_convergence,bool supports_ntsc,bool supports_bloom,bool supports_persistence,bool supports_spot){
+void ui16_crt_set_width_sender(Ui16CrtWidthsFn send,bool supports_glow,bool supports_curve,bool supports_convergence,bool supports_ntsc,bool supports_bloom,bool supports_persistence,bool supports_spot,unsigned revision){
     send_widths=send;glow_supported=send && supports_glow;curve_supported=glow_supported && supports_curve;
     convergence_supported=curve_supported && supports_convergence;
     ntsc_supported=convergence_supported && supports_ntsc;
     bloom_supported=ntsc_supported && supports_bloom;
     persistence_supported=bloom_supported && supports_persistence;
     spot_supported=persistence_supported && supports_spot;
+    display_revision=spot_supported ? revision : 0;
 }
 void ui16_crt_new_session(const Ui16CrtRecommendation &recommended,const Ui16RomIdentity &rom_id,const Ui16CrtRestore &restore,Ui16CrtSaveFn save,const Ui16CrtDefaults &defaults){
     preview_only=false;read_only=false;

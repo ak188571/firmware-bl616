@@ -8,6 +8,7 @@
 bool ui16_save_crt_override(const Ui16RomIdentity &id,const Ui16CrtSettings &value,
                            FIL &file,void *buffer,UINT capacity,bool reset){
     const bool signal=!reset && (value.convergence || value.curvature || value.needs_signal_record());
+    if(!reset && value.extended_display_record() && id.size>UINT32_MAX)return false;
     if(!value.valid() || (signal && id.system!=1 && id.system!=2))return false;
     // Re-read before EVERY attempt. A previous failed sync/close/verification
     // may have produced a valid new generation; protect that generation too.
@@ -23,13 +24,17 @@ bool ui16_save_crt_override(const Ui16RomIdentity &id,const Ui16CrtSettings &val
     // Keep legacy-only values and RESET readable by older firmware. The extension
     // represents a USER record; its widths and flags share the same CRC and slot.
     const auto flags=value.flags();
-    if(!reset && (signal || value.spot || value.persistence || value.bloom || value.glow || (flags & ~31u) || value.widths!=Ui16CrtSettings{}.widths)){
+    if(!reset && (signal || value.extended_display_record() || value.spot || value.persistence || value.bloom || value.glow || (flags & ~31u) || value.widths!=Ui16CrtSettings{}.widths)){
         record[4]=value.glow?UI16_CRT_GLOW_RECORD:UI16_CRT_EXT_RECORD;
         if(signal){
             record[4]=value.ntsc?UI16_CRT_NTSC_RECORD:value.convergence?UI16_CRT_CONVERGENCE_RECORD:value.curvature?UI16_CRT_CURVE_RECORD:UI16_CRT_SIGNAL_RECORD;
             record[5]=id.system | (unsigned(value.ntsc ? value.convergence : value.composite)<<2) | (value.composite_blur<<3) |
                       (unsigned(value.composite_bleed)<<5) | (unsigned(value.glow)<<6);
             if((value.ntsc || value.convergence) && value.curvature)record[5]|=0x80;
+        }
+        if(value.extended_display_record()){
+            record[4]|=UI16_CRT_DISPLAY_FLAG;
+            put(16,value.display_options,4);
         }
         if(value.spot)record[4]|=UI16_CRT_SPOT_FLAG;
         if(value.persistence)record[4]|=UI16_CRT_PERSISTENCE_FLAG;

@@ -25,6 +25,9 @@ constexpr unsigned UI16_CRT_BLOOM_FLAG=0x10;
 constexpr unsigned UI16_CRT_PERSISTENCE_FLAG=0x20;
 // Bit 6 marks beam spot on extended USER records. Older readers protect these slots.
 constexpr unsigned UI16_CRT_SPOT_FLAG=0x40;
+// FAT32 has 32-bit file sizes. In display-extension records bytes 16..19
+// hold display options; bytes 12..15 hold the complete on-volume ROM size.
+constexpr unsigned UI16_CRT_DISPLAY_FLAG=0x80;
 constexpr unsigned UI16_CRT_SIGNAL_SYSTEM_MASK=3;
 
 enum class Ui16CrtReadState { NoId, Missing, User, Reset, Recovered, Bad, Io, Future, Conflict };

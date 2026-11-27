@@ -22,6 +22,14 @@ struct Ui16CrtSettings {
     bool bloom=false;
     bool persistence=false;
     bool spot=false;
+    // Only write extension bits advertised by the current core.
+    std::uint32_t display_options=0;
+    static constexpr std::uint32_t WidePitch=1u<<8;
+    static constexpr unsigned DisplayRevision=1;
+    static constexpr std::uint32_t display_mask(unsigned revision) {
+        return revision>=1 ? WidePitch : 0u;
+    }
+    bool extended_display_record() const {return mask==3 || display_options!=0;}
     static constexpr std::uint32_t SpotBit=1u<<9;
     static constexpr std::uint32_t PersistenceBit=1u<<10;
     static constexpr std::uint32_t BloomBit=1u<<11;
@@ -33,7 +41,7 @@ struct Ui16CrtSettings {
     bool signal_bleed() const {return composite ? composite_bleed : bleed;}
     static constexpr std::uint32_t GlowBit=1u<<15;
 
-    bool valid() const {return (!ntsc || composite) && composite_blur<4 && blur<4 && scanline<4 && mask<3 && gamma<3 && temperature<3;}
+    bool valid() const {return (!ntsc || composite) && composite_blur<4 && blur<4 && scanline<4 && mask<4 && !(display_options & ~display_mask(DisplayRevision)) && gamma<3 && temperature<3;}
     std::uint16_t flags() const {
         return enabled | (blur<<1) | (scanline<<3) | (beam<<5) | (mask<<6) |
                (gamma<<8) | (temperature<<10) | (vignette<<12) | (rounded<<13) |
@@ -45,7 +53,7 @@ struct Ui16CrtSettings {
         v.vignette=bits&0x1000; v.rounded=bits&0x2000; v.overscan=bits&0x4000; v.bleed=bits&0x8000;
         return v;
     }
-    std::uint32_t merge(std::uint32_t config,bool extended=false,bool supports_glow=false,bool supports_curve=false,bool supports_convergence=false,bool supports_ntsc=false,bool supports_bloom=false,bool supports_persistence=false,bool supports_spot=false)const {
+    std::uint32_t merge(std::uint32_t config,bool extended=false,bool supports_glow=false,bool supports_curve=false,bool supports_convergence=false,bool supports_ntsc=false,bool supports_bloom=false,bool supports_persistence=false,bool supports_spot=false,unsigned revision=0)const {
         const std::uint32_t mask=extended?0xffff0000u:0x001f0000u;
         if(supports_spot)config=(config&~SpotBit)|(spot?SpotBit:0u);
         if(supports_persistence)config=(config&~PersistenceBit)|(persistence?PersistenceBit:0u);
@@ -54,14 +62,17 @@ struct Ui16CrtSettings {
         if(supports_convergence)config=(config&~ConvergenceBit)|(convergence?ConvergenceBit:0u);
         if(supports_curve)config=(config&~CurveBit)|(curvature?CurveBit:0u);
         if(supports_glow)config=(config&~GlowBit)|(glow?GlowBit:0u);
+        const auto owned=display_mask(revision);
+        config=(config&~owned)|(display_options&owned);
         auto active=flags();
+        if(!revision && this->mask==3)active &= ~0xc0u;
         if(extended && composite){
             active=(active & ~0x8006u) | (composite_blur<<1) | (unsigned(composite_bleed)<<15);
         }
         return (config&~mask)|((std::uint32_t(active)<<16)&mask);
     }
     bool operator==(const Ui16CrtSettings &v)const{return flags()==v.flags() && widths==v.widths && glow==v.glow &&
-        spot==v.spot && persistence==v.persistence && bloom==v.bloom && ntsc==v.ntsc && convergence==v.convergence && curvature==v.curvature && composite==v.composite && composite_blur==v.composite_blur && composite_bleed==v.composite_bleed;}
+        display_options==v.display_options && spot==v.spot && persistence==v.persistence && bloom==v.bloom && ntsc==v.ntsc && convergence==v.convergence && curvature==v.curvature && composite==v.composite && composite_blur==v.composite_blur && composite_bleed==v.composite_bleed;}
     bool operator!=(const Ui16CrtSettings &v)const{return !(*this==v);}
 };
 struct Ui16CrtRecommendation {bool present=false;Ui16CrtSettings settings;};
