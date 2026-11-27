@@ -1,0 +1,28 @@
+Console138K　CRTの共通初期値
+
+このフォルダーの defaults.tsv は、NES・SNESで共通に試せる設定例です。
+配置先はROMと同じ媒体の crt/defaults.tsv です。globalの行名は半角の * です。
+見出し・各行の最初の区切りはタブ、項目間は半角スペースです。ファイルはUTF-8で
+4096バイトまで。既存の crt_v1 形式も読み込めます。
+
+crt_v2 の指定値
+crt, beam, beamspot, glow, bloom, focus, phosphor, curve, vignette, corners, overscan　off / on
+blur, composite_blur, scan　off / weak / std / strong
+bleed, composite_bleed　off / on
+signal　rgb / composite / ntsc / rf
+mask　off / grille / shadow / slot
+pitch　1px / 2px
+gamma　off / 0.80 / 1.25
+white　off / warm / cool
+convergence　off / on / pos
+afterglow　off / on / rgb
+top, bottom, left, right　それぞれ 0～255（HDMI出力の画素数）
+
+blur・bleedはRGB用です。composite・ntsc・rfには共通のcomposite_blur・composite_bleedが
+適用されます。beamはscanと併用します。四辺の幅はoverscan=onで有効になります。
+crt=off は起動時の主スイッチだけを切ります。OSD2でCRTをONにすると設定済みの効果が現れます。
+
+共通行 * の値に、nes・snesなどの機種行で指定した項目を重ねます。titles.csvに
+crt_v1値があるタイトルでは、その3項目（CRT・BLURのRGB値・SCAN）をさらに優先します。
+有効なROM別の保存値があれば、その設定一式を最優先します。
+OSD2のSTART情報画面で DEF OK と SRC GLOBAL が、共通設定を読み込んだ目印です。

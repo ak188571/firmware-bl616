@@ -1,5 +1,6 @@
 #include "ui16_crt.h"
 #include "ui16_crt_save.h"
+#include "ui16_crt_defaults_reader.h"
 #include "ui16_rom_id_reader.h"
 #include "ui16_crt_widths.h"
 #include "ui16_osd.h"
@@ -32,7 +33,7 @@ extern "C" FRESULT f_sync(FIL *){return std::fflush(stream)?FR_DISK_ERR:FR_OK;}
 extern "C" FRESULT f_mkdir(const char *p){return fs::create_directory(local(p))?FR_OK:FR_EXIST;}
 
 static FIL file;
-alignas(64) static std::array<unsigned char,512> buffer;
+alignas(64) static std::array<unsigned char,8192> buffer;
 static std::uint32_t config=0xfedc0123;
 static std::array<std::uint8_t,4> transmitted;
 static unsigned byte_index=4;
@@ -51,10 +52,11 @@ void overlay_printf(const char *fmt,...){
 static bool save(const Ui16RomIdentity &id,const Ui16CrtSettings &s,bool reset){
     return ui16_save_crt_override(id,s,file,buffer.data(),buffer.size(),reset);
 }
-static std::unique_ptr<Menu> launch(const Ui16RomIdentity &id){
+static std::unique_ptr<Menu> launch(const Ui16RomIdentity &id,const Ui16CrtRecommendation &csv={}){
     const auto data=ui16_read_crt_override(id,file,buffer.data(),buffer.size());
-    if(id.system==1)ui16_crt_new_session({},id,data,save);
-    else ui16_crt_snes_session({},id,data,save,{});
+    const auto defaults=ui16_read_crt_defaults(id.system,"sd:/a.rom",file,buffer.data(),buffer.size());
+    if(id.system==1)ui16_crt_new_session(csv,id,data,save,defaults);
+    else ui16_crt_snes_session(csv,id,data,save,defaults);
     return std::unique_ptr<Menu>(ui16_create_crt_menu(true,true));
 }
 static void line(Menu &m,int row,const char *value){
@@ -338,4 +340,22 @@ int main(int argc,char **argv){
     std::printf("PASS system %u: phosphor colors, settings ACK and complete reset\n",system);
     std::printf("PASS system %u: independent RGB/Composite controls, shared Glow, legacy RGB, per-ROM v5 save/reload, cancel, reset and preview navigation\n",system);
     std::printf("PASS system %u: Glow toggle and frame ACK, old-core gating, schema 1/3/4 ROM A/B reload, cancel/reset\n",system);
+    fs::copy_file("example.tsv","crt/defaults.tsv");
+    menu=launch(b);
+    const unsigned flags_global=(1u<<1)|(1u<<3)|(1u<<5)|(1u<<6)|(1u<<14);
+    const auto off=(flags_global<<16)|Ui16CrtSettings::SpotBit|Ui16CrtSettings::GlowBit;
+    const auto owned=0xffff0000u|0xfff8u;
+    const std::array<std::uint8_t,4> crop={2,2,2,2};
+    assert((config & owned)==off && transmitted==crop);
+    menu->on_info(0x0008);line(*menu,1,"SRC GLOBAL");menu->on_info(0x0008);
+    change(*menu,1);assert((config & owned)==(off|(1u<<16)) && transmitted==crop);
+    choose(*menu,4);menu=launch(b);assert((config & owned)==(off|(1u<<16)));
+    menu->on_info(0x0008);line(*menu,1,"SRC USER");menu->on_info(0x0008);
+    choose(*menu,5);choose(*menu,4);
+    Ui16CrtRecommendation title;assert(ui16_parse_crt("1:2:3",title));
+    menu=launch(b,title);
+    const unsigned csv_bits=Ui16CrtSettings{true,2,3}.flags()<<16;
+    assert((config & owned)==((off & ~(0x1fu<<16))|csv_bits) && transmitted==crop);
+    fs::remove("crt/defaults.tsv");
+    std::printf("PASS system %u: GLOBAL preset, master-only toggle, four widths, ROM override, RESET and title CSV\n",system);
 }

@@ -287,7 +287,12 @@ void ui16_crt_new_session(const Ui16CrtRecommendation &recommended,const Ui16Rom
         recommended_source=defaults.source==Ui16CrtDefaultsSource::System?"SYSTEM":"GLOBAL";
     }
     if(recommended.present&&recommended.settings.valid()){
-        session_recommended=recommended.settings;recommended_source="CSV";
+        if(defaults.named_items){
+            session_recommended.enabled=recommended.settings.enabled;
+            session_recommended.blur=recommended.settings.blur;
+            session_recommended.scanline=recommended.settings.scanline;
+        }else session_recommended=recommended.settings;
+        recommended_source="CSV";
     }
     settings=session_recommended;
     if(restored.override_value.present)settings=restored.override_value.settings;

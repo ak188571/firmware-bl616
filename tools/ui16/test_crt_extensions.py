@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 import struct
+import shutil
 import subprocess
 import tempfile
 import zlib
@@ -17,9 +18,10 @@ with tempfile.TemporaryDirectory() as tmp:
     work = Path(tmp)
     exe = work/"test.exe"
     subprocess.run([*compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror", "-Wno-unused-parameter",
-                    "-DUI16_SYSTEM_MENU", "-Itests/ui16", "-Iui", "tests/ui16/crt_extensions_test.cpp",
+                    "-DUI16_SYSTEM_MENU", "-DTC_NORMAL_BUILD", "-Itests/ui16", "-Iui", "tests/ui16/crt_extensions_test.cpp",
                     "ui/ui16_crt.cpp", "ui/ui16_osd.cpp", "ui/ui16_crt_save.cpp",
-                    "ui/ui16_crt_restore.cpp", "ui/ui16_rom_id.cpp", "-o", str(exe)], cwd=repo,env=env,check=True)
+                    "ui/ui16_crt_restore.cpp", "ui/ui16_crt_defaults.cpp", "ui/ui16_rom_id.cpp", "-o", str(exe)], cwd=repo,env=env,check=True)
+    shutil.copyfile(repo/"examples/crt/defaults.tsv", work/"example.tsv")
     # Same two ROM byte streams on both systems also exercise system-key isolation.
     for system in (1,2):
         for name in ("a","b"):

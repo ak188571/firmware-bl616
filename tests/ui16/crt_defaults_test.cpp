@@ -34,7 +34,54 @@ extern "C" FRESULT f_close(FIL *f){assert(f==&file&&active==1);--active;++closes
 static Ui16CrtDefaults read(int system=1,const char *rom="sd:nes/a.nes"){
     const auto result=ui16_read_crt_defaults(system,rom,file,buffer.data(),buffer.size());assert(!active);return result;
 }
+static void check_named(){
+    const std::string header="system\tcrt_v2\n";
+    const std::string fields="crt=on blur=std scan=strong beam=on mask=shadow gamma=1.25 white=warm "
+        "vignette=on corners=on overscan=on top=0 bottom=1 left=0254 right=255 bleed=on "
+        "glow=on signal=ntsc composite_blur=off composite_bleed=off curve=on "
+        "convergence=pos bloom=on afterglow=rgb pitch=2px focus=on phosphor=on beamspot=on";
+    Ui16CrtSettings all{true,2,3};
+    all.beam=all.vignette=all.rounded=all.overscan=all.bleed=all.glow=true;
+    all.mask=2; all.gamma=2; all.temperature=1; all.widths={0,1,254,255};
+    all.composite=true; all.ntsc=true; all.composite_blur=0; all.composite_bleed=false;
+    all.curvature=all.convergence=all.bloom=all.persistence=true;
+    all.spot=true;
+    all.display_options=Ui16CrtSettings::WidePitch | Ui16CrtSettings::EdgeFocus |
+                        Ui16CrtSettings::PhosphorColor | Ui16CrtSettings::PositionRgb | Ui16CrtSettings::RgbDecay;
+    for(unsigned system:{1u,2u}){
+        const std::string name=system==1?"nes":"snes";
+        const auto text=header+name+"\t"+fields+"\n*\ttop=42\n";
+        setup(text);
+        auto result=read(system);
+        assert(result.named_items && result.source==Ui16CrtDefaultsSource::System);
+        assert(result.recommendation.settings==all);
+        result=ui16_parse_crt_defaults(text,3-system);
+        Ui16CrtSettings global;global.widths[0]=42;
+        assert(result.source==Ui16CrtDefaultsSource::Global && result.recommendation.settings==global);
+    }
+    const auto empty=ui16_parse_crt_defaults(header+"*\t\nnes\tfuture=光",1);
+    const std::string rich=header+"*\tsignal=rf convergence=pos afterglow=rgb mask=slot pitch=2px focus=on phosphor=on beamspot=on\n";
+    const auto full=ui16_parse_crt_defaults(rich,1).recommendation.settings;
+    assert(full.valid() && full.display_options==Ui16CrtSettings::display_mask(5) && full.mask==3 && full.spot);
+    const auto simpler=ui16_parse_crt_defaults(rich+"nes\tsignal=rgb convergence=on afterglow=off mask=off pitch=1px focus=off phosphor=off beamspot=off",1);
+    Ui16CrtSettings plain;plain.convergence=true;
+    assert(simpler.recommendation.present && simpler.recommendation.settings==plain);
+    assert(empty.named_items && empty.state==Ui16CrtDefaultsState::Ready && !empty.recommendation.present);
+    const auto zero=ui16_parse_crt_defaults("\xef\xbb\xbfsystem\tcrt_v2\r\n*\tbeam=on top=255\r\nnes\tbeam=off top=0",1);
+    assert(zero.source==Ui16CrtDefaultsSource::System && zero.recommendation.settings==Ui16CrtSettings{});
+    for(const char *row:{"unknown","crt=", "=on","mask==on","top=-1","bottom=256","crt=ON",
+                         "beam=on beam=off","future=a future=b","x-y=1","1key=0",
+                         "pitch=3px","convergence=rgb","afterglow=pos","signal=tv","phosphor=warm",
+                         "focus=2","mask=slots","beamspot=weak","future=a\tb","future=\xc0\x80","future=a\xc2\xa0z"}){
+        const auto result=ui16_parse_crt_defaults(header+"*\tbeam=on\nsnes\t"+row,1);
+        assert(result.state==Ui16CrtDefaultsState::Bad && !result.recommendation.present);
+    }
+    assert(ui16_parse_crt_defaults(header+"nes\tcrt=on",1).state==Ui16CrtDefaultsState::Bad);
+    assert(ui16_parse_crt_defaults(header+"*\t\n*\t",1).state==Ui16CrtDefaultsState::Bad);
+    std::puts("PASS v2: NES/SNES fields, extended modes, scoped inheritance, explicit OFF/0, future keys and invalid rows");
+}
 int main(){
+    check_named();
     const std::string header="system\tcrt_v1\n";
     const std::string good=header+"*\t1:1:3\nnes\t1:2:1\n";
     auto result=ui16_parse_crt_defaults(good,1);
