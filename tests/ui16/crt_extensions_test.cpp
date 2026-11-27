@@ -309,6 +309,13 @@ int main(int argc,char **argv){
     ui16_crt_set_width_sender(ui16_send_crt_widths,true,true,true,true,true,true,true);
     menu=launch(b);choose(*menu,0);line(*menu,2,"MASK OFF");assert(menu->get_options().back()==13);
     std::printf("PASS system %u: slot, pitch, per-ROM restore, cancel and capability gating\n",system);
+    ui16_crt_set_width_sender(ui16_send_crt_widths,true,true,true,true,true,true,true,Ui16CrtSettings::DisplayRevision);
+    menu=launch(b);change(*menu,6,-1);line(*menu,6,"SIGNAL RF");
+    assert((config & (Ui16CrtSettings::RfSignal|Ui16CrtSettings::NtscBit))==(Ui16CrtSettings::RfSignal|Ui16CrtSettings::NtscBit));
+    choose(*menu,4);menu=launch(a);line(*menu,6,"SIGNAL RGB");
+    menu=launch(b);line(*menu,6,"SIGNAL RF");change(*menu,6,-1);line(*menu,6,"SIGNAL NTSC");
+    assert(!(config & Ui16CrtSettings::RfSignal));choose(*menu,4);
+    std::printf("PASS system %u: RF signal, ROM-specific save and NTSC fallback\n",system);
     std::printf("PASS system %u: independent RGB/Composite controls, shared Glow, legacy RGB, per-ROM v5 save/reload, cancel, reset and preview navigation\n",system);
     std::printf("PASS system %u: Glow toggle and frame ACK, old-core gating, schema 1/3/4 ROM A/B reload, cancel/reset\n",system);
 }

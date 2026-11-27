@@ -99,7 +99,7 @@ struct CrtMenu:Menu {
             overlay_cursor(0,y++);overlay_printf("SCAN %s",blur_supported&&!scan_supported?"N/A":strength(settings.scanline));
             overlay_cursor(0,y++);overlay_printf("%s",storage_actions_disabled()?"SAVE N/A":save_failed?"SAVE FAILED":dirty()?"SAVE *":(saved_user||persisted_reset)?"SAVE OK":"SAVE");
             overlay_cursor(0,y++);overlay_printf("%s",reset_available()?"RESET":"RESET N/A");
-            if(extended){overlay_cursor(0,y++);overlay_printf("SIGNAL %s",settings.ntsc && ntsc_supported?"NTSC":settings.composite?"COMP.":"RGB");}
+            if(extended){overlay_cursor(0,y++);overlay_printf("SIGNAL %s",(display_revision>=2 && (settings.display_options&Ui16CrtSettings::RfSignal))?"RF":settings.ntsc && ntsc_supported?"NTSC":settings.composite?"COMP.":"RGB");}
         }else if(page==Effects){
             static const char *const masks[]={"OFF","GRILLE","SHADOW","SLOT"};
             static const char *const gamma[]={"OFF","0.80","1.25"};
@@ -184,10 +184,12 @@ struct CrtMenu:Menu {
         }else if(extended && row==signal_option()-1){
             // RGB and both composite modes share geometry; the two composite
             // modes use the same blur/bleed bank so their signal paths can be compared.
-            const int count=ntsc_supported?3:2;
-            const int current=settings.ntsc && ntsc_supported?2:int(settings.composite);
+            const int count=display_revision>=2?4:ntsc_supported?3:2;
+            const int current=count==4 && (settings.display_options&Ui16CrtSettings::RfSignal)?3:settings.ntsc && ntsc_supported?2:int(settings.composite);
             const int next=(current+(delta>0?1:count-1))%count;
-            settings.composite=next!=0;settings.ntsc=next==2;
+            settings.composite=next!=0;settings.ntsc=next>=2;
+            settings.display_options &= ~Ui16CrtSettings::RfSignal;
+            if(next==3)settings.display_options |= Ui16CrtSettings::RfSignal;
         }
         else if(row==2&&(!blur_supported||scan_supported))settings.scanline=(settings.scanline+(delta>0?1:3))%4;
         else return false;
