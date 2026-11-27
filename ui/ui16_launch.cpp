@@ -61,7 +61,7 @@ Ui16LaunchError Ui16Runtime::launch(const char *drive,const Ui16LaunchTarget &ta
     monitor_ready_=false;
     ops_.display_owner(false,ops_.context);
     tc_launch_mark(TcLaunchEvent::ProgramBegin);
-    if(!ops_.program(core.c_str(),false,ops_.context))return Ui16LaunchError::ProgramFailed;
+    if(!ops_.program(core.c_str(),MonitorBootWait::Full,ops_.context))return Ui16LaunchError::ProgramFailed;
     tc_launch_mark(TcLaunchEvent::ProgramEnd);
     if(!ops_.wait_core(target.core_id,ops_.context))return Ui16LaunchError::CoreTimeout;
     tc_launch_mark(TcLaunchEvent::CoreReady);
@@ -72,13 +72,13 @@ Ui16LaunchError Ui16Runtime::launch(const char *drive,const Ui16LaunchTarget &ta
     tc_launch_success();
     return Ui16LaunchError::None;
 }
-Ui16LaunchError Ui16Runtime::restore_monitor(bool try_short_boot_wait)
+Ui16LaunchError Ui16Runtime::restore_monitor(MonitorBootWait wait)
 {
     if(monitor_ready_)return Ui16LaunchError::None;
     std::string path;
     if(!ops_.find_core("monitor.bin",path,ops_.context))return Ui16LaunchError::MissingMonitor;
     ops_.display_owner(false,ops_.context);
-    if(!ops_.program(path.c_str(),try_short_boot_wait,ops_.context))return Ui16LaunchError::MonitorProgramFailed;
+    if(!ops_.program(path.c_str(),wait,ops_.context))return Ui16LaunchError::MonitorProgramFailed;
     if(!ops_.wait_core(0,ops_.context))return Ui16LaunchError::MonitorTimeout;
     ops_.display_owner(true,ops_.context);
     monitor_ready_=true;

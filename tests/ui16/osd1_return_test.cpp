@@ -18,7 +18,7 @@ static int selected_policy(int id, const char *drv, Ui16SystemAction system_acti
 }
 
 static std::vector<Ui16LaunchError> results;
-static std::vector<bool> attempts;
+static std::vector<MonitorBootWait> attempts;
 static bool waiting_for_input;
 static constexpr unsigned UI16_BUTTON_CONFIRM = 0x0101;
 static void ui16_wait_release() {}
@@ -27,9 +27,9 @@ static void delay(unsigned) {}
 static void overlay_status(const char *, ...) {}
 #define TC_DEBUG_PRINT(...) ((void)0)
 const char *ui16_launch_error_text(Ui16LaunchError) { return "test error"; }
-Ui16LaunchError Ui16Runtime::restore_monitor(bool short_wait) {
+Ui16LaunchError Ui16Runtime::restore_monitor(MonitorBootWait wait) {
     assert(attempts.size() < results.size());
-    attempts.push_back(short_wait);
+    attempts.push_back(wait);
     return results[attempts.size() - 1];
 }
 struct Ui16Browser {
@@ -39,18 +39,19 @@ struct Ui16Browser {
 #include "osd1_restore_menu.inc"
 
 static void check(int policy, std::initializer_list<Ui16LaunchError> outcomes,
-                  std::initializer_list<bool> expected, bool manual) {
+                  std::initializer_list<MonitorBootWait> expected, bool manual) {
     Ui16Runtime runtime({});
     Ui16Browser browser;
     results = outcomes;
     attempts.clear();
     waiting_for_input = false;
     ui16_restore_menu(runtime, browser, policy);
-    assert(attempts == std::vector<bool>(expected));
+    assert(attempts == std::vector<MonitorBootWait>(expected));
     assert(waiting_for_input == manual && browser.resumed == 1);
 }
 
 int main() {
+    using W = MonitorBootWait;
     using A = Ui16SystemAction;
     using E = Ui16LaunchError;
     const int nes = selected_policy(1, "sd:", A::ReturnToList, true);
@@ -62,16 +63,16 @@ int main() {
     assert(selected_policy(3, "sd:", A::ReturnToList, true) == 0);
 #ifdef TANG_CONSOLE138K
     assert(nes == 1);
-    check(nes, {E::None}, {true}, false);
-    check(nes, {E::MonitorProgramFailed, E::None}, {true, false}, false);
-    check(nes, {E::MonitorTimeout, E::None}, {true, false}, false);
-    check(nes, {E::MonitorTimeout, E::MonitorTimeout, E::None}, {true, false, false}, true);
+    check(nes, {E::None}, {W::Checked500ms}, false);
+    check(nes, {E::MonitorProgramFailed, E::None}, {W::Checked500ms, W::Full}, false);
+    check(nes, {E::MonitorTimeout, E::None}, {W::Checked500ms, W::Full}, false);
+    check(nes, {E::MonitorTimeout, E::MonitorTimeout, E::None}, {W::Checked500ms, W::Full, W::Full}, true);
 #else
     assert(nes == 0);
-    check(nes, {E::None}, {false}, false);
+    check(nes, {E::None}, {W::Full}, false);
 #endif
-    check(0, {E::MonitorProgramFailed, E::None}, {false, false}, true);
-    check(snes, {E::MonitorProgramFailed, E::None}, {true, false}, false);
-    check(snes, {E::MonitorTimeout, E::None}, {true, false}, true);
+    check(0, {E::MonitorProgramFailed, E::None}, {W::Full, W::Full}, true);
+    check(snes, {E::MonitorProgramFailed, E::None}, {W::Checked1s, W::Full}, false);
+    check(snes, {E::MonitorTimeout, E::None}, {W::Checked1s, W::Full}, true);
     std::puts("PASS OSD1 return selection, single automatic retry and button-driven recovery");
 }

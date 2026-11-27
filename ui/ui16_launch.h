@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include "../fpga/monitor_boot_wait.h"
 #include "ui16_crt_settings.h"
 #include "tc_launch_trace.h"
 
@@ -26,7 +27,7 @@ struct Ui16LaunchOps {
     void *context=nullptr;
     bool (*file_ready)(const char *path,void *)=nullptr;
     bool (*find_core)(const char *name,std::string &path,void *)=nullptr;
-    bool (*program)(const char *path,bool try_short_boot_wait,void *)=nullptr;
+    bool (*program)(const char *path,MonitorBootWait wait,void *)=nullptr;
     bool (*wait_core)(int expected,void *)=nullptr;
     bool (*load_rom)(int core_id,const char *path,void *)=nullptr;
     void (*display_owner)(bool ui16,void *)=nullptr;
@@ -39,7 +40,7 @@ class Ui16Runtime {
 public:
     explicit Ui16Runtime(Ui16LaunchOps ops):ops_(ops){}
     Ui16LaunchError launch(const char *drive,const Ui16LaunchTarget &target,const Ui16LaunchRequest &request);
-    Ui16LaunchError restore_monitor(bool try_short_boot_wait=false);
+    Ui16LaunchError restore_monitor(MonitorBootWait wait=MonitorBootWait::Full);
     bool monitor_ready() const {return monitor_ready_;}
 private:
     Ui16LaunchOps ops_;

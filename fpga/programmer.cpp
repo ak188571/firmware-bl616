@@ -1205,7 +1205,7 @@ namespace {
 struct RecoveryPort {
     const char* path;
     uint32_t uart_pin_config;
-    bool short_wait;
+    MonitorBootWait wait;
     // SET/CLEAR mode uses the SET command to drive high. Sense the pad through
     // the input buffer, while keeping the output enabled and in SET/CLEAR mode.
     static constexpr uint32_t NativeDrive=GPIO_INT_MASK | GPIO_FUNC_SWGPIO | GPIO_OUTPUT_EN |
@@ -1233,6 +1233,8 @@ struct RecoveryPort {
         return true;
     }
     bool reload() {
+        const bool short_wait = wait != MonitorBootWait::Full;
+        const auto minimum_us = static_cast<uint32_t>(wait) * 1000u;
         TcTransitionSection measured(TcTransitionStep::Reload);
 #ifdef TC_LAUNCH_TRACE
         TcReloadTiming *timing=nullptr;
@@ -1327,13 +1329,13 @@ struct RecoveryPort {
                     probe.mark(TcBootProbe::LogoNoTimeout,!logo_timeout);
                     probe.mark(TcBootProbe::LogoAttempted,cleared);
                     probe.mark(TcBootProbe::Native,native);
-                    probe.mark(TcBootProbe::MinimumWait,elapsed>=1000000);
+                    probe.mark(TcBootProbe::MinimumWait,elapsed>=minimum_us);
                     probe.mark(TcBootProbe::WithinDeadline,elapsed<=5000000);
                     probe.mark(TcBootProbe::Stable,ready_count>=3);
                 }
 #endif
                 if (elapsed>5000000) break;
-                if (elapsed>=1000000 && ready_count>=3) {
+                if (elapsed>=minimum_us && ready_count>=3) {
                     accepted=true;
                     break;
                 }
@@ -1363,7 +1365,7 @@ struct RecoveryPort {
 }
 #endif
 
-bool fpga_program(const char* fname, bool try_short_boot_wait) {
+bool fpga_program(const char* fname, MonitorBootWait wait) {
 #ifdef TANG_CONSOLE138K
     static bool monitor_confirmed = false;
     // GPIO28 is also UART TX. Drive native selection in one register write
@@ -1373,17 +1375,17 @@ bool fpga_program(const char* fname, bool try_short_boot_wait) {
     const uint32_t saved = select;
     const char* base = strrchr(fname, '/');
     const bool monitor = strcmp(base ? base+1 : fname, "monitor.bin") == 0;
-    const bool short_wait=monitor && try_short_boot_wait;
+    if (!monitor) wait = MonitorBootWait::Full;
 #ifdef TC_JTAG_SPI_HZ
     // Observe the native-select pad during every JTAG DMA stream, including launch.
     select = RecoveryPort::NativeDrive | GPIO_INPUT_EN;
 #else
-    select = RecoveryPort::NativeDrive | (short_wait ? GPIO_INPUT_EN : 0u);
+    select = RecoveryPort::NativeDrive | (wait != MonitorBootWait::Full ? GPIO_INPUT_EN : 0u);
 #endif
     bflb_mtimer_delay_us(10);
-    RecoveryPort port{fname, saved, short_wait};
+    RecoveryPort port{fname, saved, wait};
 #ifdef TC_LAUNCH_TRACE
-    if (short_wait && tc_transition_active) {
+    if (wait != MonitorBootWait::Full && tc_transition_active) {
         port.short_trace=&tc_transition_active->short_boot;
         auto &attempt=*port.short_trace;
         attempt.attempted=true;

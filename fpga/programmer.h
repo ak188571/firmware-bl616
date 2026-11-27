@@ -2,7 +2,7 @@
 #define PROGRAMMER_H
 
 #include <cstddef>
-#include <cstdint>
+#include "monitor_boot_wait.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -10,7 +10,7 @@ extern "C" {
 
 // main function: program FPGA with a bitstream (.bin) file
 // return true if successful
-extern bool fpga_program(const char *fname, bool try_short_boot_wait);
+extern bool fpga_program(const char *fname, MonitorBootWait wait);
 
 #ifdef __cplusplus
 }

@@ -47,20 +47,21 @@ uint16_t joy1_state=0xffff,joy2_state=0xffff;
 int f_stat(const char *,FILINFO *p){p->fattrib=directory?AM_DIR:0;return file_result;}
 bool find_core_for_board(std::string &p,const char *n){p=std::string("sd:cores/")+n;return true;}
 bool core_running=true,gba_bios_loaded=true,gba_missing_bios_warned=true;int active_core=1,_overlay_on=1;
-static bool short_wait_requested=false;
+using W = MonitorBootWait;
+static W requested_wait=W::Full;
 static uint64_t now=0;static int id=1,requests=0;
-struct StartupAttempt { bool short_wait,programmed; int reported_id; };
+struct StartupAttempt { W wait; bool programmed; int reported_id; };
 static std::vector<StartupAttempt> startup_attempts;
 static std::size_t startup_calls=0;
-bool fpga_program(const char *path,bool short_wait){
+bool fpga_program(const char *path,W wait){
  if(!startup_attempts.empty()){
   assert(std::string(path)=="sd:cores/console138k/monitor.bin" && startup_calls<startup_attempts.size());
   const auto attempt=startup_attempts[startup_calls++];
-  assert(short_wait==attempt.short_wait);
+  assert(wait==attempt.wait);
   id=attempt.reported_id;
   return attempt.programmed;
  }
- short_wait_requested=short_wait;return program_ok;
+ requested_wait=wait;return program_ok;
 }
 uint64_t bflb_mtimer_get_time_ms(){return now;}
 void delay(unsigned ms){now+=ms;}
@@ -154,18 +155,18 @@ int main(){
   assert(startup_calls==attempts.size() && requests==expected_id_reads);
   startup_attempts.clear();
  };
- check_startup({{true,true,0}},true,1);
- check_startup({{true,false,-1},{false,true,0}},true,1);
- check_startup({{true,false,-1},{false,false,-1}},false,0);
- check_startup({{true,true,2},{false,true,0}},true,11);
- check_startup({{true,true,-1},{false,true,-1}},false,20);
+ check_startup({{W::Checked500ms,true,0}},true,1);
+ check_startup({{W::Checked500ms,false,-1},{W::Full,true,0}},true,1);
+ check_startup({{W::Checked500ms,false,-1},{W::Full,false,-1}},false,0);
+ check_startup({{W::Checked500ms,true,2},{W::Full,true,0}},true,11);
+ check_startup({{W::Checked500ms,true,-1},{W::Full,true,-1}},false,20);
  std::puts("Cold startup passed: checked first attempt, single full retry, monitor ID timeout, terminal failure");
  storage_mutex=1;
  assert(ui16_hw_file_ready("sd:a.nes",nullptr));directory=true;assert(!ui16_hw_file_ready("x",nullptr));directory=false;
  file_result=1;assert(!ui16_hw_file_ready("x",nullptr));file_result=0;
  std::string path;assert(ui16_hw_find_core("nestang.bin",path,nullptr)&&path=="sd:cores/nestang.bin");
- assert(ui16_hw_program("x",true,nullptr));assert(short_wait_requested&&!core_running&&active_core==-1&&!gba_bios_loaded&&!gba_missing_bios_warned&&_overlay_on==1&&joy1_state==0&&joy2_state==0);
- program_ok=false;assert(!ui16_hw_program("x",false,nullptr));assert(!short_wait_requested);program_ok=true;
+ assert(ui16_hw_program("x",W::Checked1s,nullptr));assert(requested_wait==W::Checked1s&&!core_running&&active_core==-1&&!gba_bios_loaded&&!gba_missing_bios_warned&&_overlay_on==1&&joy1_state==0&&joy2_state==0);
+ program_ok=false;assert(!ui16_hw_program("x",W::Full,nullptr));assert(requested_wait==W::Full);program_ok=true;
  id=1;assert(ui16_hw_wait_core(1,nullptr)&&active_core==1);
  now=0;requests=0;id=2;assert(!ui16_hw_wait_core(1,nullptr)&&now>=2000&&requests<=10);
  started=true;result=0;assert(ui16_hw_load_rom(1,"sd:nes/a.nes",nullptr)&&!overlay_on());
@@ -353,7 +354,7 @@ extern std::vector<int16_t> main_menu_config;extern const char *drv;
 core_info *find_core_by_id(int);
 bool ui16_hw_file_ready(const char *,void *);
 bool ui16_hw_find_core(const char *,std::string &,void *);
-bool ui16_hw_program(const char *,bool,void *);
+bool ui16_hw_program(const char *,MonitorBootWait,void *);
 bool ui16_hw_wait_core(int,void *);
 bool ui16_hw_load_rom(int,const char *,void *);
 void ui16_hw_display_owner(bool,void *);

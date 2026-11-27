@@ -178,7 +178,7 @@ static int menu_loadrom(const char *dir) {
     // load core if in cores/ dir
     if (fname.find(string(drv) + "cores") == 0) {
         overlay_status("Core: %s", fname.c_str());
-        fpga_program(fname.c_str(),false);
+        fpga_program(fname.c_str(),MonitorBootWait::Full);
         _overlay_on = 1;                // turn on overlay after core is loaded
         return 0;       // return to main menu
     }
@@ -208,7 +208,7 @@ static int menu_loadrom(const char *dir) {
             string fname_core;
             if (find_core_for_board(fname_core, core->core_file)) {
                 // load core
-                fpga_program(fname_core.c_str(),false);
+                fpga_program(fname_core.c_str(),MonitorBootWait::Full);
                 _overlay_on = 1;
 
                 // allow 2 seconds for core to start
@@ -612,7 +612,7 @@ static bool ui16_hw_find_core(const char *name,std::string &path,void *)
     FILINFO info{};
     return find_core_for_board(path,name)&&f_stat(path.c_str(),&info)==FR_OK&&!(info.fattrib&AM_DIR)&&info.fsize>0;
 }
-static bool ui16_hw_program(const char *path,bool try_short_boot_wait,void *)
+static bool ui16_hw_program(const char *path,MonitorBootWait wait,void *)
 {
     core_running=false;active_core=-1;
     crt_rom_identity={};crt_restore={};crt_defaults={};
@@ -620,7 +620,7 @@ static bool ui16_hw_program(const char *path,bool try_short_boot_wait,void *)
     TcStorageLease lease;if(!lease)return false;
     extern bool gba_bios_loaded,gba_missing_bios_warned;
     gba_bios_loaded=false;gba_missing_bios_warned=false;
-    const bool ok=fpga_program(path,try_short_boot_wait);
+    const bool ok=fpga_program(path,wait);
     // Native FPGA pads report changes; discard the previous FPGA image's latch.
     taskENTER_CRITICAL();joy1_state=0;joy2_state=0;taskEXIT_CRITICAL();
     _overlay_on=1;
@@ -708,13 +708,15 @@ static void ui16_wait_release()
 }
 static void ui16_restore_menu(Ui16Runtime &runtime,Ui16Browser &browser,int short_wait_core)
 {
-    bool try_short_boot_wait = short_wait_core != 0;
+    MonitorBootWait next_wait = MonitorBootWait::Full;
+    if (short_wait_core == 1) next_wait = MonitorBootWait::Checked500ms;
+    if (short_wait_core == 2) next_wait = MonitorBootWait::Checked1s;
     for(;;){
-        const bool short_wait=try_short_boot_wait;
-        try_short_boot_wait=false;
-        const auto error=runtime.restore_monitor(short_wait);
+        const auto wait = next_wait;
+        next_wait = MonitorBootWait::Full;
+        const auto error=runtime.restore_monitor(wait);
         if(error==Ui16LaunchError::None)break;
-        if(short_wait && (error==Ui16LaunchError::MonitorProgramFailed ||
+        if(wait != MonitorBootWait::Full && (error==Ui16LaunchError::MonitorProgramFailed ||
                           (short_wait_core==1 && error==Ui16LaunchError::MonitorTimeout))){
             // A second attempt performs a fresh RELOAD and full five-second wait.
             overlay_status("RETRY: FULL 5S WAIT");
@@ -751,13 +753,13 @@ static Ui16GameList ui16_load_for_core(int core_id, const char *relative_path, v
 static bool ui16_start_monitor(const char *path)
 {
 #ifdef TANG_CONSOLE138K
-    if (fpga_program(path, true) && ui16_hw_wait_core(0, nullptr))
+    if (fpga_program(path, MonitorBootWait::Checked500ms) && ui16_hw_wait_core(0, nullptr))
         return true;
 
     // Restart from RELOAD with the full wait, including after a core ID timeout.
     overlay_status("RETRY: FULL 5S WAIT");
 #endif
-    return fpga_program(path, false) && ui16_hw_wait_core(0, nullptr);
+    return fpga_program(path, MonitorBootWait::Full) && ui16_hw_wait_core(0, nullptr);
 }
 #endif
 
@@ -942,7 +944,7 @@ static void main_task(void *pvParameters)
             delay(10);
         }
 #else
-        fpga_program(fname.c_str(), false);
+        fpga_program(fname.c_str(), MonitorBootWait::Full);
 #endif
         // UI16 fixed-frame test BEGIN
         #ifdef UI16_UART_SELFTEST
