@@ -31,6 +31,7 @@ Read read_record(const char *path,const Ui16RomIdentity &id,FIL &file,void *buff
     const unsigned system=signal?(record[5]&UI16_CRT_SIGNAL_SYSTEM_MASK):record[5];
     if(signal && (((record[5]&0x80) && schema!=UI16_CRT_CONVERGENCE_RECORD && schema!=UI16_CRT_NTSC_RECORD) || (system!=1 && system!=2)))return Read::Bad;
     const bool display=(record[4] & UI16_CRT_DISPLAY_FLAG)!=0;
+    if(display && (number(record,16,4)&Ui16CrtSettings::PositionRgb) && !(schema==UI16_CRT_CONVERGENCE_RECORD || (schema==UI16_CRT_NTSC_RECORD && (record[5]&4))))return Read::Bad;
     if(display && (number(record,16,4)&Ui16CrtSettings::RfSignal) && schema!=UI16_CRT_NTSC_RECORD)return Read::Bad;
     if(display && !number(record,16,4) && ((number(record,6,2)>>6)&3)!=3)return Read::Future;
     if(display && (number(record,16,4) & ~std::uint64_t(Ui16CrtSettings::display_mask(Ui16CrtSettings::DisplayRevision))))return Read::Future;

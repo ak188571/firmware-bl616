@@ -26,9 +26,11 @@ struct Ui16CrtSettings {
     std::uint32_t display_options=0;
     static constexpr std::uint32_t WidePitch=1u<<8;
     static constexpr std::uint32_t RfSignal=1u<<7;
-    static constexpr unsigned DisplayRevision=2;
+    static constexpr std::uint32_t EdgeFocus=1u<<6;
+    static constexpr std::uint32_t PositionRgb=1u<<5;
+    static constexpr unsigned DisplayRevision=3;
     static constexpr std::uint32_t display_mask(unsigned revision) {
-        return (revision>=2 ? RfSignal : 0u) | (revision>=1 ? WidePitch : 0u);
+        return (revision>=3 ? PositionRgb : 0u) | ((revision>=3 ? EdgeFocus : 0u) | ((revision>=2 ? RfSignal : 0u) | (revision>=1 ? WidePitch : 0u)));
     }
     bool extended_display_record() const {return mask==3 || display_options!=0;}
     static constexpr std::uint32_t SpotBit=1u<<9;
@@ -42,7 +44,7 @@ struct Ui16CrtSettings {
     bool signal_bleed() const {return composite ? composite_bleed : bleed;}
     static constexpr std::uint32_t GlowBit=1u<<15;
 
-    bool valid() const {return (!(display_options&RfSignal) || ntsc) && (!ntsc || composite) && composite_blur<4 && blur<4 && scanline<4 && mask<4 && !(display_options & ~display_mask(DisplayRevision)) && gamma<3 && temperature<3;}
+    bool valid() const {return (!(display_options&PositionRgb) || convergence) && (!(display_options&RfSignal) || ntsc) && (!ntsc || composite) && composite_blur<4 && blur<4 && scanline<4 && mask<4 && !(display_options & ~display_mask(DisplayRevision)) && gamma<3 && temperature<3;}
     std::uint16_t flags() const {
         return enabled | (blur<<1) | (scanline<<3) | (beam<<5) | (mask<<6) |
                (gamma<<8) | (temperature<<10) | (vignette<<12) | (rounded<<13) |

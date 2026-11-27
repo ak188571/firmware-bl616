@@ -113,11 +113,12 @@ struct CrtMenu:Menu {
             overlay_cursor(0,y++);overlay_printf("BLEED %s",settings.signal_bleed()?"ON":"OFF");
             if(glow_supported){overlay_cursor(0,y++);overlay_printf("GLOW %s",settings.glow?"ON":"OFF");}
             if(curve_supported){overlay_cursor(0,y++);overlay_printf("CURVE %s",settings.curvature?"ON":"OFF");}
-            if(convergence_supported){overlay_cursor(0,y++);overlay_printf("CONVERG. %s",settings.convergence?"ON":"OFF");}
+            if(convergence_supported){overlay_cursor(0,y++);overlay_printf("CONVERG. %s",(display_revision>=3 && (settings.display_options&Ui16CrtSettings::PositionRgb))?"POS":settings.convergence?"ON":"OFF");}
             if(bloom_supported){overlay_cursor(0,y++);overlay_printf("BLOOM %s",settings.bloom?"ON":"OFF");}
             if(persistence_supported){overlay_cursor(0,y++);overlay_printf("AFTRGLW %s",settings.persistence?"ON":"OFF");}
             if(spot_supported){overlay_cursor(0,y++);overlay_printf("BEAMSPOT %s",settings.spot?"ON":"OFF");}
             if(display_revision>=1){overlay_cursor(0,y++);overlay_printf("PITCH %s",(settings.display_options&Ui16CrtSettings::WidePitch)?"2PX":"1PX");}
+            if(display_revision>=3){overlay_cursor(0,y++);overlay_printf("FOCUS %s",(settings.display_options&Ui16CrtSettings::EdgeFocus)?"ON":"OFF");}
         }else{
             static const char *const edges[]={"TOP","BOTTOM","LEFT","RIGHT"};
             overlay_cursor(0,y++);overlay_printf("OVERSCAN %s",settings.overscan?"ON":"OFF");
@@ -136,6 +137,7 @@ struct CrtMenu:Menu {
             if(persistence_supported)rows.push_back(12);
             if(spot_supported)rows.push_back(13);
             if(display_revision>=1)rows.push_back(14);
+            if(display_revision>=3)rows.push_back(15);
             return rows;
         }
         if(page==Crop)return {0,1,2,3,4,5};
@@ -166,11 +168,21 @@ struct CrtMenu:Menu {
                     break;
             case 7: if(!glow_supported)return false;settings.glow=!settings.glow;break;
             case 8: if(!curve_supported)return false;settings.curvature=!settings.curvature;break;
+            case 14: if(display_revision<3)return false;settings.display_options^=Ui16CrtSettings::EdgeFocus;break;
             case 13: if(!display_revision)return false;settings.display_options^=Ui16CrtSettings::WidePitch;break;
             case 12: if(!spot_supported)return false;settings.spot=!settings.spot;break;
             case 11: if(!persistence_supported)return false;settings.persistence=!settings.persistence;break;
             case 10: if(!bloom_supported)return false;settings.bloom=!settings.bloom;break;
-            case 9: if(!convergence_supported)return false;settings.convergence=!settings.convergence;break;
+            case 9: {
+                if(!convergence_supported)return false;
+                const int count=display_revision>=3 ? 3 : 2;
+                const int current=count==3 && (settings.display_options&Ui16CrtSettings::PositionRgb) ? 2 : int(settings.convergence);
+                const int next=(current+(delta>0?1:count-1))%count;
+                settings.convergence=next!=0;
+                settings.display_options &= ~Ui16CrtSettings::PositionRgb;
+                if(next==2)settings.display_options |= Ui16CrtSettings::PositionRgb;
+                break;
+            }
             default:return false;
             }
         }else if(page==Crop){
