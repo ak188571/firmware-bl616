@@ -745,6 +745,18 @@ static Ui16GameList ui16_load_for_core(int core_id, const char *relative_path, v
     ui16_load_titles((path + "/titles.csv").c_str(), games);
     return games;
 }
+
+static bool ui16_start_monitor(const char *path)
+{
+#ifdef TANG_CONSOLE138K
+    if (fpga_program(path, true) && ui16_hw_wait_core(0, nullptr))
+        return true;
+
+    // Restart from RELOAD with the full wait, including after a core ID timeout.
+    overlay_status("RETRY: FULL 5S WAIT");
+#endif
+    return fpga_program(path, false) && ui16_hw_wait_core(0, nullptr);
+}
 #endif
 
 // Display main menu and call other menu functions
@@ -781,9 +793,8 @@ static void main_task(void *pvParameters)
     // load monitor core at startup
     string fname;
     if (find_core_for_board(fname, "monitor.bin")) {
-        const bool monitor_loaded = fpga_program(fname.c_str(),false);
 #ifdef UI16_SYSTEM_MENU
-        if (!monitor_loaded || !ui16_hw_wait_core(0,nullptr)) {
+        if (!ui16_start_monitor(fname.c_str())) {
             overlay_status("UI16: monitor load failed");
             for (;;) delay(1000);
         }
@@ -808,7 +819,9 @@ static void main_task(void *pvParameters)
                 entries.push_back({id, "OPTIONS"});
             }
         }
+#ifndef TANG_CONSOLE138K
         delay(1000);
+#endif
         count=entries.size();
         int initial = 0;
         for (std::size_t i = 0; i < count; ++i) {
@@ -920,7 +933,7 @@ static void main_task(void *pvParameters)
             delay(10);
         }
 #else
-        (void)monitor_loaded;
+        fpga_program(fname.c_str(), false);
 #endif
         // UI16 fixed-frame test BEGIN
         #ifdef UI16_UART_SELFTEST

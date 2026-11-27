@@ -5,6 +5,7 @@ import os,subprocess
 ROOT=Path(__file__).resolve().parents[2]
 source=(ROOT/'main.cpp').read_text(encoding='utf-8')
 adapters=source.split('// UI16 launch adapters BEGIN',1)[1].split('\n',1)[1].split('// UI16 launch adapters END',1)[0]
+startup=source[source.index('static bool ui16_start_monitor('):source.index('\n#endif\n\n// Display main menu')]
 ownership=source.split('// Application storage ownership BEGIN',1)[1].split('\n',1)[1].split('static bool pcxt_disk_owner()',1)[0]
 hid=source[source.index('static void send_hid_to_core(void)'):source.index('// // (R L X A RT LT DN UP START SELECT Y B)')]
 start=source.index('                const auto error=runtime.launch(')
@@ -47,8 +48,20 @@ int f_stat(const char *,FILINFO *p){p->fattrib=directory?AM_DIR:0;return file_re
 bool find_core_for_board(std::string &p,const char *n){p=std::string("sd:cores/")+n;return true;}
 bool core_running=true,gba_bios_loaded=true,gba_missing_bios_warned=true;int active_core=1,_overlay_on=1;
 static bool short_wait_requested=false;
-bool fpga_program(const char *,bool short_wait){short_wait_requested=short_wait;return program_ok;}
 static uint64_t now=0;static int id=1,requests=0;
+struct StartupAttempt { bool short_wait,programmed; int reported_id; };
+static std::vector<StartupAttempt> startup_attempts;
+static std::size_t startup_calls=0;
+bool fpga_program(const char *path,bool short_wait){
+ if(!startup_attempts.empty()){
+  assert(std::string(path)=="sd:cores/console138k/monitor.bin" && startup_calls<startup_attempts.size());
+  const auto attempt=startup_attempts[startup_calls++];
+  assert(short_wait==attempt.short_wait);
+  id=attempt.reported_id;
+  return attempt.programmed;
+ }
+ short_wait_requested=short_wait;return program_ok;
+}
 uint64_t bflb_mtimer_get_time_ms(){return now;}
 void delay(unsigned ms){now+=ms;}
 static unsigned starting_frames=0,tx_waits=0;
@@ -115,7 +128,7 @@ void vTaskDelay(unsigned){++index;}
 static std::vector<unsigned> bytes;
 void fpga_tx_header(int c,int n){assert(c==9&&n==5);}
 void fpga_tx_byte(unsigned char b){bytes.push_back(b);}
-'''+ownership+adapters+hid+r'''
+'''+ownership+adapters+startup+hid+r'''
 static unsigned session_calls=0,preview_calls=0,snes_session_calls=0,releases=0;
 void ui16_crt_preview_session(){++preview_calls;}
 static Ui16CrtRecommendation captured;
@@ -135,6 +148,18 @@ void launch_handoff(Ui16LaunchError result,const Ui16LaunchRequest &request){
 }
 '''+r'''
 int main(){
+ const auto check_startup=[](std::vector<StartupAttempt> attempts,bool success,int expected_id_reads){
+  startup_attempts=attempts;startup_calls=0;requests=0;now=0;
+  assert(ui16_start_monitor("sd:cores/console138k/monitor.bin")==success);
+  assert(startup_calls==attempts.size() && requests==expected_id_reads);
+  startup_attempts.clear();
+ };
+ check_startup({{true,true,0}},true,1);
+ check_startup({{true,false,-1},{false,true,0}},true,1);
+ check_startup({{true,false,-1},{false,false,-1}},false,0);
+ check_startup({{true,true,2},{false,true,0}},true,11);
+ check_startup({{true,true,-1},{false,true,-1}},false,20);
+ std::puts("Cold startup passed: checked first attempt, single full retry, monitor ID timeout, terminal failure");
  storage_mutex=1;
  assert(ui16_hw_file_ready("sd:a.nes",nullptr));directory=true;assert(!ui16_hw_file_ready("x",nullptr));directory=false;
  file_result=1;assert(!ui16_hw_file_ready("x",nullptr));file_result=0;
@@ -262,7 +287,7 @@ if os.name=='nt':
     converted=subprocess.check_output(['cygpath','-m','/ucrt64/bin'],text=True,encoding='utf-8').strip()
     extra=['-B'+converted+'/']
 exe=build/('launch_adapters_test.exe' if os.name=='nt' else 'launch_adapters_test')
-subprocess.run(['g++',*extra,'-DUI16_SYSTEM_MENU','-std=c++17','-Wall','-Wextra','-Werror','-pedantic','-I'+str(ROOT/'ui'),'-I'+str(ROOT/'utils'),str(path),'-o',str(exe)],check=True)
+subprocess.run(['g++',*extra,'-DUI16_SYSTEM_MENU','-DTANG_CONSOLE138K','-std=c++17','-Wall','-Wextra','-Werror','-pedantic','-I'+str(ROOT/'ui'),'-I'+str(ROOT/'utils'),str(path),'-o',str(exe)],check=True)
 subprocess.run([str(exe)],check=True)
 
 
@@ -309,7 +334,7 @@ subprocess.run(['g++',*extra,'-DUI16_SYSTEM_MENU','-std=c++17','-Wall','-Wextra'
 subprocess.run([str(exe)],check=True)
 
 # Compile the actual UI16 main-task branch as well, including its popup/resume loop.
-branch=source[source.index('        // Keep the configured order;'):source.index('\n#else\n        (void)monitor_loaded;')]
+branch=source[source.index('        // Keep the configured order;'):source.rindex('\n#else\n',0,source.index('// UI16 fixed-frame test BEGIN'))]
 syntax=r'''
 #include "ui16_browser.h"
 #include "ui16_launch.h"
