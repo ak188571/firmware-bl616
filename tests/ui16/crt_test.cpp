@@ -615,7 +615,7 @@ int main(){
         assert(first.cells[(first.y+9)*32+first.x+14]=='v');
         const auto bottom=frame(*extended,position,extended->get_options().back());
         check_quadrant(bottom);check_unclipped_text();
-        assert(visible(bottom.cells,bottom.x,bottom.y,bottom.width,bottom.height).find(">FOCUS OFF")!=std::string::npos);
+        assert(visible(bottom.cells,bottom.x,bottom.y,bottom.width,bottom.height).find(">PHOSPHOR OFF")!=std::string::npos);
         const auto last=frame(*extended,position,13);
         check_quadrant(last);check_unclipped_text();
         assert(last.cells[(last.y+2)*32+last.x+14]=='^');

@@ -119,6 +119,7 @@ struct CrtMenu:Menu {
             if(spot_supported){overlay_cursor(0,y++);overlay_printf("BEAMSPOT %s",settings.spot?"ON":"OFF");}
             if(display_revision>=1){overlay_cursor(0,y++);overlay_printf("PITCH %s",(settings.display_options&Ui16CrtSettings::WidePitch)?"2PX":"1PX");}
             if(display_revision>=3){overlay_cursor(0,y++);overlay_printf("FOCUS %s",(settings.display_options&Ui16CrtSettings::EdgeFocus)?"ON":"OFF");}
+            if(display_revision>=5){overlay_cursor(0,y++);overlay_printf("PHOSPHOR %s",(settings.display_options&Ui16CrtSettings::PhosphorColor)?"ON":"OFF");}
         }else{
             static const char *const edges[]={"TOP","BOTTOM","LEFT","RIGHT"};
             overlay_cursor(0,y++);overlay_printf("OVERSCAN %s",settings.overscan?"ON":"OFF");
@@ -138,6 +139,7 @@ struct CrtMenu:Menu {
             if(spot_supported)rows.push_back(13);
             if(display_revision>=1)rows.push_back(14);
             if(display_revision>=3)rows.push_back(15);
+            if(display_revision>=5)rows.push_back(16);
             return rows;
         }
         if(page==Crop)return {0,1,2,3,4,5};
@@ -169,6 +171,7 @@ struct CrtMenu:Menu {
             case 7: if(!glow_supported)return false;settings.glow=!settings.glow;break;
             case 8: if(!curve_supported)return false;settings.curvature=!settings.curvature;break;
             case 14: if(display_revision<3)return false;settings.display_options^=Ui16CrtSettings::EdgeFocus;break;
+            case 15: if(display_revision<5)return false;settings.display_options^=Ui16CrtSettings::PhosphorColor;break;
             case 13: if(!display_revision)return false;settings.display_options^=Ui16CrtSettings::WidePitch;break;
             case 12: if(!spot_supported)return false;settings.spot=!settings.spot;break;
             case 11: {

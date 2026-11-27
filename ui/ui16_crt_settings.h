@@ -29,9 +29,14 @@ struct Ui16CrtSettings {
     static constexpr std::uint32_t EdgeFocus=1u<<6;
     static constexpr std::uint32_t PositionRgb=1u<<5;
     static constexpr std::uint32_t RgbDecay=1u<<4;
-    static constexpr unsigned DisplayRevision=4;
+    static constexpr std::uint32_t PhosphorColor=1u<<3;
+    static constexpr unsigned DisplayRevision=5;
     static constexpr std::uint32_t display_mask(unsigned revision) {
-        return (revision>=4 ? RgbDecay : 0u) | ((revision>=3 ? PositionRgb : 0u) | ((revision>=3 ? EdgeFocus : 0u) | ((revision>=2 ? RfSignal : 0u) | (revision>=1 ? WidePitch : 0u))));
+        return (revision >= 1 ? WidePitch : 0u)
+             | (revision >= 2 ? RfSignal : 0u)
+             | (revision >= 3 ? EdgeFocus | PositionRgb : 0u)
+             | (revision >= 4 ? RgbDecay : 0u)
+             | (revision >= 5 ? PhosphorColor : 0u);
     }
     bool extended_display_record() const {return mask==3 || display_options!=0;}
     static constexpr std::uint32_t SpotBit=1u<<9;
@@ -45,7 +50,14 @@ struct Ui16CrtSettings {
     bool signal_bleed() const {return composite ? composite_bleed : bleed;}
     static constexpr std::uint32_t GlowBit=1u<<15;
 
-    bool valid() const {return (!(display_options&RgbDecay) || persistence) && (!(display_options&PositionRgb) || convergence) && (!(display_options&RfSignal) || ntsc) && (!ntsc || composite) && composite_blur<4 && blur<4 && scanline<4 && mask<4 && !(display_options & ~display_mask(DisplayRevision)) && gamma<3 && temperature<3;}
+    bool valid() const {
+        const bool signal_valid = (!ntsc || composite) && (!(display_options & RfSignal) || ntsc);
+        const bool effects_valid = (!(display_options & PositionRgb) || convergence)
+                               && (!(display_options & RgbDecay) || persistence);
+        return signal_valid && effects_valid && composite_blur < 4 && blur < 4
+            && scanline < 4 && mask < 4 && gamma < 3 && temperature < 3
+            && !(display_options & ~display_mask(DisplayRevision));
+    }
     std::uint16_t flags() const {
         return enabled | (blur<<1) | (scanline<<3) | (beam<<5) | (mask<<6) |
                (gamma<<8) | (temperature<<10) | (vignette<<12) | (rounded<<13) |

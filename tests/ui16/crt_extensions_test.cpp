@@ -326,6 +326,16 @@ int main(int argc,char **argv){
     menu=launch(a);choose(*menu,0);line(*menu,12,"AFTRGLW OFF");
     menu=launch(b);choose(*menu,0);line(*menu,12,"AFTRGLW RGB");line(*menu,15,"FOCUS ON");
     std::printf("PASS system %u: per-primary afterglow stored independently\n",system);
+    menu=launch(b);choose(*menu,0);change(*menu,16);line(*menu,16,"PHOSPHOR ON");
+    choose(*menu,0);choose(*menu,0);choose(*menu,4);
+    menu=launch(a);choose(*menu,0);line(*menu,16,"PHOSPHOR OFF");
+    menu=launch(b);choose(*menu,0);line(*menu,16,"PHOSPHOR ON");line(*menu,12,"AFTRGLW RGB");
+    menu->on_info(0x0008);ui16_crt_accept_status(config^Ui16CrtSettings::PhosphorColor);
+    menu->on_tick(80);line(*menu,3,"WAITING");ui16_crt_accept_status(config);
+    menu->on_tick(81);line(*menu,3,"FRAME ACK");menu->on_info(0x0008);
+    choose(*menu,0);choose(*menu,0);choose(*menu,5);choose(*menu,4);
+    menu=launch(b);choose(*menu,0);line(*menu,16,"PHOSPHOR OFF");line(*menu,15,"FOCUS OFF");line(*menu,14,"PITCH 1PX");
+    std::printf("PASS system %u: phosphor colors, settings ACK and complete reset\n",system);
     std::printf("PASS system %u: independent RGB/Composite controls, shared Glow, legacy RGB, per-ROM v5 save/reload, cancel, reset and preview navigation\n",system);
     std::printf("PASS system %u: Glow toggle and frame ACK, old-core gating, schema 1/3/4 ROM A/B reload, cancel/reset\n",system);
 }
