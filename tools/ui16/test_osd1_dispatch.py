@@ -3,7 +3,7 @@ from pathlib import Path
 import subprocess,os
 root=Path(__file__).resolve().parents[2]
 main=(root/'main.cpp').read_text(encoding='utf-8')
-block=main[main.index('                        if(system_action==Ui16SystemAction::Restart){'):main.index('                        if(return_to_menu)break;')]
+block=main[main.index('                        if(system_action==Ui16SystemAction::Restart){'):main.index('                        if(return_to_menu){')]
 block=block.replace('continue;','return;')
 code=r'''
 #include <cassert>
@@ -41,3 +41,16 @@ compiler=os.environ.get('CXX','g++')
 exe=build/'osd1_dispatch.exe'
 subprocess.run([compiler,'-BC:/msys64/ucrt64/bin/','-std=c++17','-Wall','-Wextra','-Werror','-pedantic','-I'+str(root/'ui'),str(source),'-o',str(exe)],check=True)
 subprocess.run([str(exe)],check=True)
+
+# Compile the same selection and retry code used by the game task.
+selection=main[main.index('                        if(return_to_menu){'):main.index('                        ui16_wait_release(); // OSD')]
+restore=main[main.index('static void ui16_restore_menu('):main.index('static Ui16GameList ui16_load_for_core(')]
+(build/'osd1_return_selection.inc').write_text(selection,encoding='utf-8')
+(build/'osd1_restore_menu.inc').write_text(restore,encoding='utf-8')
+for console138k in (False,True):
+    exe=build/('osd1_return_138k.exe' if console138k else 'osd1_return_other.exe')
+    flags=['-DTANG_CONSOLE138K'] if console138k else []
+    subprocess.run([compiler,'-BC:/msys64/ucrt64/bin/','-std=c++17','-Wall','-Wextra','-Werror',*flags,
+                    '-I'+str(root/'ui'),'-I'+str(root/'utils'),'-I'+str(build),
+                    str(root/'tests/ui16/osd1_return_test.cpp'),'-o',str(exe)],check=True)
+    subprocess.run([str(exe)],check=True)

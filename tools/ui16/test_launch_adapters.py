@@ -380,7 +380,7 @@ extern Ui16GameOsd game_osd_owner;
 void delay(unsigned);
 void get_joypad_states(uint16_t *,uint16_t *,uint16_t *,uint16_t *);
 unsigned long long bflb_mtimer_get_time_ms();
-void ui16_wait_release();void ui16_restore_menu(Ui16Runtime &,Ui16Browser &,bool);void send_hid_to_core();
+void ui16_wait_release();void ui16_restore_menu(Ui16Runtime &,Ui16Browser &,int);void send_hid_to_core();
 Menu *create_default_menu(const char *);
 void run_ui16_main(){
 '''+branch+'\n}\n'

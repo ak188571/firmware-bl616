@@ -10,6 +10,9 @@ main=(ROOT/'main.cpp').read_text(encoding='utf-8')
 parser=main[main.index('            } else if (type == 2)'):main.index('            } else if(type==0x12')]
 parser=parser[parser.index('#ifdef UI16_SYSTEM_MENU'):]
 query=main[main.index('static bool ui16_hw_osd_ready('):main.index('// UI16 launch adapters BEGIN')]
+capabilities=main[main.index('static volatile unsigned crt_display_revision'):main.index('static Ui16GameOsd game_osd_owner')]
+tag_start=main.index('    char osd_tag[')
+tag_state=main[tag_start:main.index('#endif',tag_start)]
 code=r'''
 #include <cstdint>
 #include <string>
@@ -26,7 +29,7 @@ static int depth=0;
 #define taskENTER_CRITICAL() do {++depth;} while(0)
 #define taskEXIT_CRITICAL() do {--depth;} while(0)
 static std::vector<unsigned> bytes;
-static volatile bool osd_config_ready=false,osd_config_capable=false,crt_stage1_capable=false,crt_blur_capable=false,crt_scanline_capable=false,restart_capable=false;
+'''+capabilities+r'''
 static bool reply=true,supported=true;
 static bool rom_capable=false, spi_capable=false;
 void tc_rom_uart_capabilities(bool protocol,bool uart8,bool spi=false){rom_capable=protocol&&uart8;spi_capable=rom_capable&&spi;}
@@ -39,7 +42,7 @@ void delay(unsigned ms){clock_ms+=ms;}
 '''+source+query+r'''
 void feed_config(const std::string &s){
     unsigned pos=4,len=s.size()+1;
-    char osd_tag[7]={};unsigned osd_tag_count=0;bool osd_tag_found=false,crt_tag_found=false,blur_tag_found=false,scan_tag_found=false,restart_tag_found=false,rom_tag_found=false,spi_tag_found=false,uart8_tag_found=false;
+'''+tag_state+r'''
     for(unsigned char ch:s){
 '''+parser+r'''
     }

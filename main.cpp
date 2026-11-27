@@ -706,14 +706,16 @@ static void ui16_wait_release()
     TcTransitionSection measured(TcTransitionStep::InputRelease);
     while(ui16_buttons())delay(10);
 }
-static void ui16_restore_menu(Ui16Runtime &runtime,Ui16Browser &browser,bool try_short_boot_wait)
+static void ui16_restore_menu(Ui16Runtime &runtime,Ui16Browser &browser,int short_wait_core)
 {
+    bool try_short_boot_wait = short_wait_core != 0;
     for(;;){
         const bool short_wait=try_short_boot_wait;
         try_short_boot_wait=false;
         const auto error=runtime.restore_monitor(short_wait);
         if(error==Ui16LaunchError::None)break;
-        if(short_wait && error==Ui16LaunchError::MonitorProgramFailed){
+        if(short_wait && (error==Ui16LaunchError::MonitorProgramFailed ||
+                          (short_wait_core==1 && error==Ui16LaunchError::MonitorTimeout))){
             // A second attempt performs a fresh RELOAD and full five-second wait.
             overlay_status("RETRY: FULL 5S WAIT");
             TC_DEBUG_PRINT("UI16 restore: automatic full-wait retry\n");
@@ -853,6 +855,7 @@ static void main_task(void *pvParameters)
                 auto *target=find_core_by_id(request.core_id);
                 const Ui16LaunchTarget launch_target=target?
                     Ui16LaunchTarget{target->id,target->rom_dir,target->core_file}:Ui16LaunchTarget{};
+                int short_wait_core = 0;
                 const auto error=runtime.launch(drv,launch_target,request);
                 if(error==Ui16LaunchError::None){
                     // Preserve normal game input; the UI button assignment is not a game remap.
@@ -897,6 +900,13 @@ static void main_task(void *pvParameters)
                             continue;
                         }
                         if(return_to_menu){
+                            if (std::string(drv) == "sd:") {
+                                if (request.core_id == 2) short_wait_core = 2;
+#ifdef TANG_CONSOLE138K
+                                if (request.core_id == 1 && system_action == Ui16SystemAction::ReturnToList)
+                                    short_wait_core = 1;
+#endif
+                            }
                             tc_transition_begin(1);
                             break;
                         }
@@ -905,8 +915,7 @@ static void main_task(void *pvParameters)
                     menu_clear();
                 }
                 tc_transition_begin(1); // Also cover restoration after a failed launch.
-                ui16_restore_menu(runtime,browser,error==Ui16LaunchError::None &&
-                    request.core_id==2 && std::string(drv)=="sd:");
+                ui16_restore_menu(runtime,browser,short_wait_core);
 #ifdef UI16_SD_FONT
                 // FPGA reprogramming restores the initial embedded font ROM.
                 // Never trust a cached dynamic slot after returning from a game.
